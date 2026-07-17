@@ -1,61 +1,323 @@
-(()=>{"use strict";
-const KEY="chapisuro.phase3.candidates.v1",OLD="chapisuro.phase2.candidates.v1",HALL="chapisuro.phase2.hall.v1",MODE="chapisuro.phase3.mode.v1";
-const $=s=>document.querySelector(s),form=$("#candidate-form"),list=$("#list"),empty=$("#empty"),count=$("#count"),compare=$("#top-compare"),compareList=$("#compare-list"),filter=$("#filter"),sort=$("#sort"),error=$("#error"),toast=$("#toast");let editing=null,timer,storedMode=read(MODE),mode=["morning","noon","night"].includes(storedMode)?storedMode:"night",items=load();
-function read(k){try{return localStorage.getItem(k)}catch(e){return null}}function write(k,v){try{localStorage.setItem(k,v);return true}catch(e){error.textContent="端末に保存できませんでした。";return false}}
-function n(v){if(v===null||v===undefined||v==="")return null;let x=Number(v);return Number.isFinite(x)?x:null}function esc(v){return String(v).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;")}function id(){return window.crypto&&window.crypto.randomUUID?window.crypto.randomUUID():Date.now()+"-"+Math.random().toString(16).slice(2)}
-function normalize(x){return{id:x.id||id(),hall:x.hall||read(HALL)||null,machine:x.machine||"機種未設定",machineNumber:x.machineNumber||"未設定",currentGames:n(x.currentGames),totalGames:n(x.totalGames),firstHits:n(x.firstHits),bonusCount:n(x.bonusCount??x.atCount),previousGames:n(x.previousGames),maxCoins:n(x.maxCoins),currentDiff:n(x.currentDiff??x.currentCoins),highDiff:n(x.highDiff??x.highestCoins),lowDiff:n(x.lowDiff??x.lowestCoins),graphState:x.graphState||null,recentFlow:x.recentFlow||x.recentTrend||null,previousGraph:x.previousGraph||null,note:x.note||null,createdAt:x.createdAt||new Date().toISOString(),updatedAt:x.updatedAt||x.createdAt||new Date().toISOString(),importedAt:x.importedAt||null,importSource:x.importSource||"手動入力",importBatchId:x.importBatchId||null}}
-function load(){try{let v=read(KEY);if(v!==null){let a=JSON.parse(v);return Array.isArray(a)?a.map(normalize):[]}let old=JSON.parse(read(OLD)||"[]");let a=Array.isArray(old)?old.map(normalize):[];if(a.length)write(KEY,JSON.stringify(a));return a}catch(e){console.warn(e);return[]}}
-function save(){return write(KEY,JSON.stringify(items))}function fmt(v,u=""){return v===null||v===undefined?"—":(v>0&&u==="枚"?"+":"")+Number(v).toLocaleString("ja-JP")+u}
-const graphW={"右肩上がり":12,"緩やかに上昇":8,"上下しながら上昇":9,"横ばい":0,"上下に荒い":-1,"緩やかに下降":-7,"右肩下がり":-11,"大きく凹んでいる":-8,"V字回復":13,"上昇後に失速":-8,"不明":0},flowW={"上昇中":9,"横ばい":0,"下降中":-9,"急上昇後":3,"急下降後":-7,"底から回復中":13,"高い位置で停滞":6,"低い位置で停滞":-7,"不明":0};
-function percentile(item,key){let pool=items.map(x=>n(x[key])).filter(x=>x!==null).sort((a,b)=>a-b),v=n(item[key]);if(v===null||pool.length<2||pool[0]===pool[pool.length-1])return null;return(v-pool[0])/(pool[pool.length-1]-pool[0])}
-function evaluate(x){let score=40,r=[],cg=n(x.currentGames),pg=n(x.previousGames),tg=n(x.totalGames),cur=n(x.currentDiff),hi=n(x.highDiff),lo=n(x.lowDiff),p=percentile(x,"currentGames");
-if(cg!==null){let gain=Math.min(mode==="depth"?32:18,cg/(mode==="depth"?28:45));score+=gain;r.push(`現在${fmt(cg,"G")}${p!==null?(p>=.99?"で候補内では最も深い":p>=.67?"で候補内では深め":""):""}`)}
-if(pg!==null&&cg!==null){let sum=pg+cg;score+=Math.min(mode==="depth"?14:7,sum/80);r.push(`前日最終${fmt(pg,"G")}を含めると累計${fmt(sum,"G")}`)}else if(pg!==null)r.push(`前日最終${fmt(pg,"G")}`);
-if(tg!==null){score+=(mode==="behavior"?Math.min(12,tg/450):Math.min(5,tg/1000));if(tg<1000)r.push(`当日総回転数${fmt(tg,"G")}で参考度は低め`)}
-if(x.firstHits!==null&&tg>0){let rate=Math.round(tg/x.firstHits),rp=percentile(x,"firstHits");score+=mode==="behavior"?Math.min(13,x.firstHits*1.2):Math.min(5,x.firstHits*.5);r.push(`初当たり${x.firstHits}回（約1/${rate}）${rp>=.67?"で候補内では良好":""}`)}
-let gw=graphW[x.graphState]||0,fw=flowW[x.recentFlow]||0;if(mode==="behavior"){score+=gw*1.25+fw*1.2}else{score+=gw*.55+fw*.7;if(x.graphState==="大きく凹んでいる")score+=13;if(x.recentFlow==="底から回復中")score+=6}if(x.graphState)r.push(`グラフ全体は${x.graphState}`);if(x.recentFlow)r.push(`直近は${x.recentFlow}`);
-if(cur!==null){score+=mode==="behavior"?Math.max(-13,Math.min(9,cur/300)):Math.max(-5,Math.min(4,cur/700));r.push(`現在差枚は${fmt(cur,"枚")}`)}if(hi!==null&&cur!==null&&hi-cur>=1500){score-=mode==="behavior"?10:4;r.push(`最高差枚${fmt(hi,"枚")}から${fmt(hi-cur,"枚").replace("+","")}下降`)}if(lo!==null&&cur!==null&&cur-lo>=800){score+=mode==="depth"?7:5;r.push(`最低差枚${fmt(lo,"枚")}から${fmt(cur-lo,"枚").replace("+","")}回復`)}
-score=Math.max(0,Math.min(100,Math.round(score)));let fields=[cg,tg,x.firstHits,x.bonusCount,pg,x.maxCoins,cur,hi,lo,x.graphState,x.recentFlow,x.previousGraph].filter(v=>v!==null&&v!==undefined&&v!=="").length,confidence=fields>=9&&tg>=2000?"高":fields>=5&&(!tg||tg>=800)?"中":"低";if(confidence==="低")r.push("入力情報が少ないため評価は参考値");return{score,confidence,reasons:r.slice(0,6)}}
-function stars(s){let k=Math.max(1,Math.ceil(s/20));return"★".repeat(k)+"☆".repeat(5-k)}function judgment(s){return s>=75?"おすすめ":s>=55?"候補":s>=35?"様子見":"見送り"}
-function graph(x){let patterns={"右肩上がり":[75,65,55,43,35,24],"緩やかに上昇":[66,62,57,52,47,40],"上下しながら上昇":[72,50,63,35,49,25],"横ばい":[50,47,53,48,52,50],"上下に荒い":[65,25,72,20,67,38],"緩やかに下降":[35,40,47,53,61,68],"右肩下がり":[24,35,46,56,68,78],"大きく凹んでいる":[30,45,62,78,82,76],"V字回復":[30,48,72,78,50,25],"上昇後に失速":[70,48,25,22,42,58]};let ys=(patterns[x.graphState]||[50,50,50,50,50,50]).slice();if(x.recentFlow==="上昇中"||x.recentFlow==="底から回復中")ys[5]=Math.max(12,ys[4]-22);if(x.recentFlow==="下降中")ys[5]=Math.min(84,ys[4]+22);let vals=[x.lowDiff,x.highDiff,x.currentDiff].filter(v=>n(v)!==null).map(Number),min=vals.length?Math.min(...vals):null,max=vals.length?Math.max(...vals):null;if(n(x.currentDiff)!==null&&max!==min)ys[5]=80-(x.currentDiff-min)/(max-min)*60;let pts=ys.map((y,i)=>`${8+i*36},${y}`).join(" ");return`<div class="mini-graph"><svg viewBox="0 0 196 92" role="img" aria-label="入力情報から作成した簡易グラフ"><line x1="8" y1="46" x2="188" y2="46" stroke="#444" stroke-dasharray="3 4"/><polyline points="${pts}" fill="none" stroke="#f2b84b" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="188" cy="${ys[5]}" r="4" fill="#f2b84b"/></svg><div class="graph-labels"><span>最低 ${fmt(x.lowDiff,"枚")}</span><span>現在 ${fmt(x.currentDiff,"枚")}</span><span>最高 ${fmt(x.highDiff,"枚")}</span></div></div>`}
-function ranked(){let a=items.map(x=>({...x,ev:evaluate(x)}));if(filter.value!=="all")a=a.filter(x=>x.machine===filter.value);return a.sort((a,b)=>sort.value==="games"?(b.currentGames||0)-(a.currentGames||0):sort.value==="created"?new Date(b.createdAt)-new Date(a.createdAt):b.ev.score-a.ev.score||new Date(b.createdAt)-new Date(a.createdAt))}
-function render(){let a=ranked();count.textContent=a.length+"台";empty.classList.toggle("hidden",a.length>0);$("#reset-all").classList.toggle("hidden",!items.length);compare.classList.toggle("hidden",!a.length);compareList.innerHTML=a.slice(0,3).map((x,i)=>`<div class="compare-item"><span class="compare-rank">${i+1}位</span><div class="compare-name"><strong>${esc(x.machine)} ${esc(x.machineNumber)}番台</strong><small>${fmt(x.currentGames,"G")} · ${fmt(x.currentDiff,"枚")} · ${esc(x.graphState||"不明")} / ${esc(x.recentFlow||"不明")}</small></div><div class="compare-score"><strong>${x.ev.score}点</strong><small>参考度 ${x.ev.confidence}</small></div></div>`).join("");list.innerHTML=a.map((x,i)=>{let e=x.ev,data=[["現在G",fmt(x.currentGames,"G")],["総回転",fmt(x.totalGames,"G")],["初当たり",fmt(x.firstHits,"回")],["当たり合計",fmt(x.bonusCount,"回")],["前日最終",fmt(x.previousGames,"G")],["最大持玉",fmt(x.maxCoins,"枚")],["現在差枚",fmt(x.currentDiff,"枚")],["グラフ",x.graphState||"—"],["直近",x.recentFlow||"—"]];return`<article class="card" data-id="${esc(x.id)}"><div class="card-line"></div><div class="card-main"><div class="score-head"><div><div class="stars">${stars(e.score)}</div><div class="score-row"><span class="badge">${judgment(e.score)}</span><span class="score-num">${e.score}<small>点</small></span><span class="reliability">参考度 ${e.confidence}</span></div></div><span class="rank">${i+1}位</span></div><div class="machine"><h3>${esc(x.machine)}</h3><p>${esc(x.hall||"ホール未設定")} · 台番号 ${esc(x.machineNumber)}</p></div>${graph(x)}<div class="data-grid">${data.map(d=>`<div class="datum"><small>${d[0]}</small><strong>${esc(d[1])}</strong></div>`).join("")}</div><div class="reasons"><h4>判定理由</h4><ul>${e.reasons.map(r=>`<li>${esc(r)}</li>`).join("")}</ul></div>${x.previousGraph?`<div class="memo">過去データ：${esc(x.previousGraph)}</div>`:""}${x.note?`<div class="memo">${esc(x.note)}</div>`:""}</div><div class="actions"><button data-action="edit">編集</button><button data-action="delete">削除</button></div></article>`}).join("")}
-function fromForm(fd,old){let get=k=>{let v=String(fd.get(k)||"").trim();return v||null};return normalize({id:old?.id||id(),hall:read(HALL)||null,machine:get("machine"),machineNumber:get("machineNumber"),currentGames:n(get("currentGames")),totalGames:n(get("totalGames")),firstHits:n(get("firstHits")),bonusCount:n(get("bonusCount")),previousGames:n(get("previousGames")),maxCoins:n(get("maxCoins")),currentDiff:n(get("currentDiff")),highDiff:n(get("highDiff")),lowDiff:n(get("lowDiff")),graphState:get("graphState"),recentFlow:get("recentFlow"),previousGraph:get("previousGraph"),note:get("note"),createdAt:old?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()})}
-function resetForm(keep=true){let m=keep?form.machine.value:"";form.reset();form.machine.value=m;editing=null;$("#form-mode").textContent="新規候補";$("#form-title").textContent="候補台を追加";$("#save").textContent="候補に追加";$("#cancel-edit").classList.add("hidden");error.textContent=""}function notify(t){clearTimeout(timer);toast.textContent=t;toast.classList.add("show");timer=setTimeout(()=>toast.classList.remove("show"),1800)}
-function edit(x){editing=x.id;Object.keys(x).forEach(k=>{if(form.elements[k])form.elements[k].value=x[k]??""});$("#form-mode").textContent="候補を編集中";$("#form-title").textContent=x.machine+" "+x.machineNumber+"番台";$("#save").textContent="変更を保存";$("#cancel-edit").classList.remove("hidden");$(".panel").scrollIntoView({behavior:"smooth"})}
-form.addEventListener("submit",e=>{e.preventDefault();let fd=new FormData(form);if(!fd.get("machine")||!fd.get("machineNumber")){error.textContent="機種名と台番号を入力してください。";return}let old=items.find(x=>x.id===editing),x=fromForm(fd,old),before=items;items=old?items.map(y=>y.id===old.id?x:y):items.concat(x);if(!save()){items=before;return}let was=!!old;resetForm(true);render();notify(was?"候補を更新しました":"候補を追加しました")});
-form.addEventListener("click",e=>{let b=e.target.closest("button[data-add]");if(!b)return;let input=$("#"+b.dataset.target);input.value=(n(input.value)||0)+Number(b.dataset.add)});list.addEventListener("click",e=>{let b=e.target.closest("button[data-action]");if(!b)return;let x=items.find(i=>i.id===b.closest("[data-id]").dataset.id);if(b.dataset.action==="edit")edit(x);else if(confirm(`「${x.machine} ${x.machineNumber}番台」を削除しますか？`)){items=items.filter(i=>i.id!==x.id);save();render()}});
-$("#reset-machine").onclick=()=>resetForm(false);$("#cancel-edit").onclick=()=>resetForm(true);filter.onchange=render;sort.onchange=render;$("#reset-all").onclick=()=>{if(confirm("候補台をすべて削除しますか？")){items=[];save();resetForm(true);render()}};
-document.querySelectorAll(".mode").forEach(b=>b.onclick=()=>{mode=b.dataset.mode;write(MODE,mode);document.querySelectorAll(".mode").forEach(x=>x.classList.toggle("active",x===b));$("#mode-description").textContent=mode==="depth"?"ゲーム数・前日最終・大きな凹みを重視":"初当たり・総回転・上昇傾向・差枚を重視";render()});
-function hall(){let v=read(HALL)||"";$("#hall-display").textContent=v||"未設定";return v}$("#hall-edit").onclick=()=>{$("#hall-form").classList.remove("hidden");$("#hall-name").value=hall()};$("#hall-cancel").onclick=()=>$("#hall-form").classList.add("hidden");$("#hall-form").onsubmit=e=>{e.preventDefault();write(HALL,$("#hall-name").value.trim());$("#hall-form").classList.add("hidden");hall();notify("ホール名を保存しました")};
-const HISTORY="chapisuro.phase4.importHistory.v1",LAST_MACHINE="chapisuro.phase4.lastImportMachine.v1";let previewRows=[],importSource="表貼り付け";
-const MODE_CONFIG={morning:{label:"朝",description:"前日最終・最大持玉・グラフ・当たり回数を重視",weights:{previous:.28,maxCoins:.22,graph:.22,hits:.18,current:.10}},noon:{label:"昼",description:"グラフ・当たり履歴・最大持玉・現在ゲーム数を重視",weights:{graph:.30,hits:.25,maxCoins:.20,current:.18,previous:.07}},night:{label:"夜",description:"現在ゲーム数・グラフ・当たり履歴・最大持玉を重視",weights:{current:.34,graph:.27,hits:.22,maxCoins:.12,previous:.05}}};
-const GRAPH_QUALITY={"右肩上がり":1,"緩やかに上昇":.88,"上下しながら上昇":.82,"V字回復":.78,"横ばい":.55,"上下に荒い":.45,"大きく凹んでいる":.35,"緩やかに下降":.25,"上昇後に失速":.18,"右肩下がり":.08,"不明":.45};
-function clamp01(v){return Math.max(0,Math.min(1,v))}function modeLabel(){return MODE_CONFIG[mode].label}function modeDescription(){return MODE_CONFIG[mode].description}
-function scoreCommon(candidate,selectedMode){let cfg=MODE_CONFIG[selectedMode]||MODE_CONFIG.night,w=cfg.weights,current=n(candidate.currentGames),previous=n(candidate.previousGames),max=n(candidate.maxCoins),total=n(candidate.totalGames),first=n(candidate.firstHits)||0,bonus=n(candidate.bonusCount)||0,graphValue=candidate.graphState?GRAPH_QUALITY[candidate.graphState]??.45:.45,currentValue=current===null?.25:clamp01(current/700),previousValue=previous===null?.25:clamp01(previous/500),maxValue=max===null?.25:clamp01(max/3000),hitCount=first+bonus,hitsValue=total&&total>0?clamp01(hitCount/(total/170)):clamp01(hitCount/20),score=15+75*(w.current*currentValue+w.previous*previousValue+w.maxCoins*maxValue+w.graph*graphValue+w.hits*hitsValue),reasons=[];
-if(current!==null)reasons.push(`現在${fmt(current,"G")}${current>=500?"で深め":current<=50?"で浅め":""}`);if(candidate.graphState)reasons.push(candidate.graphState);if(max!==null)reasons.push(`最大持玉${fmt(max,"枚")}`);if(hitCount>0)reasons.push(`当たり履歴${hitCount}回${hitsValue>=.7?"で良好":""}`);if(selectedMode==="morning"&&previous!==null)reasons.unshift(`前日最終${fmt(previous,"G")}`);
-let drop=n(candidate.highDiff)!==null&&n(candidate.currentDiff)!==null?n(candidate.highDiff)-n(candidate.currentDiff):0;if(current!==null&&current<=50){score-=selectedMode==="morning"?5:12;if(max!==null&&max>=1800){score-=10;reasons.unshift("爆発直後・一撃後ヤメの可能性")}}if(candidate.graphState==="右肩下がり")score-=8;if(candidate.graphState==="上昇後に失速"||drop>=1800){score-=9;reasons.unshift(drop>=1800?`最高差枚から${fmt(drop,"枚").replace("+","")}下降`:"上昇後に失速")}
-let dataCount=[current,previous,max,total,candidate.firstHits,candidate.bonusCount,candidate.graphState,candidate.currentDiff].filter(v=>v!==null&&v!==undefined&&v!=="").length,confidence=dataCount>=6&&total>=2000?"高":dataCount>=4?"中":"低";score=Math.max(0,Math.min(100,Math.round(score)));if(!reasons.length)reasons.push("入力データが少ないため参考値");return{score,confidence,reasons:reasons.slice(0,5),commentTitle:score>=75?`${cfg.label}おすすめ`:score>=55?`${cfg.label}の候補`:score>=35?"慎重に検討":"おすすめしません"}}
-function scoreOtome(candidate,selectedMode){return scoreCommon(candidate,selectedMode)}function scoreMonkey(candidate,selectedMode){return scoreCommon(candidate,selectedMode)}function scoreKabaneri(candidate,selectedMode){return scoreCommon(candidate,selectedMode)}function scoreHokuto(candidate,selectedMode){return scoreCommon(candidate,selectedMode)}function scoreGhoul(candidate,selectedMode){return scoreCommon(candidate,selectedMode)}
-function scoreMachine(candidate,selectedMode){let name=String(candidate.machine||"");if(name.includes("乙女"))return scoreOtome(candidate,selectedMode);if(name.includes("モンキー"))return scoreMonkey(candidate,selectedMode);if(name.includes("カバネリ"))return scoreKabaneri(candidate,selectedMode);if(name.includes("北斗"))return scoreHokuto(candidate,selectedMode);if(name.includes("グール"))return scoreGhoul(candidate,selectedMode);return scoreCommon(candidate,selectedMode)}
-function graphDone(x){return!!(x.graphState||x.recentFlow||x.currentDiff!==null||x.highDiff!==null||x.lowDiff!==null)}
-function ranked4(){let a=items.map(x=>({...x,ev:scoreMachine(x,mode)}));if(filter.value==="graph-done")a=a.filter(graphDone);else if(filter.value==="graph-missing")a=a.filter(x=>!graphDone(x));else if(filter.value!=="all")a=a.filter(x=>x.machine===filter.value);return a.sort((a,b)=>sort.value==="games"?(b.currentGames||0)-(a.currentGames||0):sort.value==="created"?new Date(b.createdAt)-new Date(a.createdAt):b.ev.score-a.ev.score||new Date(b.createdAt)-new Date(a.createdAt))}
-function render4(){let a=ranked4();count.textContent=a.length+"台";empty.classList.toggle("hidden",a.length>0);$("#reset-all").classList.toggle("hidden",!items.length);compare.classList.toggle("hidden",!a.length);compareList.innerHTML=a.slice(0,3).map((x,i)=>`<div class="compare-item"><span class="compare-rank">${i+1}位</span><div class="compare-name"><strong>${esc(x.machine)} ${esc(x.machineNumber)}番台</strong><small>${fmt(x.currentGames,"G")} · ${fmt(x.currentDiff,"枚")} · ${esc(x.graphState||"グラフ未入力")}</small></div><div class="compare-score"><strong>${x.ev.score}点</strong><small>参考度 ${x.ev.confidence}</small></div></div>`).join("");list.innerHTML=a.map((x,i)=>{let e=x.ev,gd=graphDone(x),data=[["現在G",fmt(x.currentGames,"G")],["総回転",fmt(x.totalGames,"G")],["初当たり",fmt(x.firstHits,"回")],["AT・ART",fmt(x.bonusCount,"回")],["前日最終",fmt(x.previousGames,"G")],["最大持玉",fmt(x.maxCoins,"枚")],["現在差枚",fmt(x.currentDiff,"枚")],["グラフ",x.graphState||"未入力"]];return`<article class="card" data-id="${esc(x.id)}"><div class="card-line"></div><div class="card-main"><div class="score-head"><div><div class="stars">${stars(e.score)}</div><div class="score-row"><span class="badge">${judgment(e.score)}</span><span class="score-num">${e.score}<small>点</small></span><span class="reliability">参考度 ${gd?e.confidence:(e.confidence==="高"?"中":"低")}</span></div>${gd?"":'<span class="provisional">暫定評価 · グラフ未入力</span>'}</div><span class="rank">${i+1}位</span></div><div class="machine"><h3>${esc(x.machine)}</h3><p>${esc(x.hall||"ホール未設定")} · 台番号 ${esc(x.machineNumber)}</p></div>${gd?graph(x):'<div class="mini-graph">グラフ未入力</div>'}<div class="data-grid">${data.map(d=>`<div class="datum"><small>${d[0]}</small><strong>${esc(d[1])}</strong></div>`).join("")}</div><div class="reasons"><h4>判定理由</h4><ul>${e.reasons.map(r=>`<li>${esc(r)}</li>`).join("")}</ul></div>${x.note?`<div class="memo">${esc(x.note)}</div>`:""}<button class="graph-add" data-action="edit">${gd?"グラフ情報を編集":"グラフを追加入力"}</button></div><div class="actions"><button data-action="edit">編集</button><button data-action="delete">削除</button></div></article>`}).join("")}
-function normHeader(v){return String(v||"").normalize("NFKC").trim().toLowerCase().replace(/[\s_・\-]/g,"")}
-const aliases={hall:["ホール","店舗","店舗名","hall"],machine:["機種","機種名","machine"],machineNumber:["台番号","台番","番号","machinenumber"],currentGames:["スタート","現在g","現在ゲーム","ゲーム数","currentgames"],totalGames:["総回転","総ゲーム","累計ゲーム","回転数","totalgames"],firstHits:["初当たり","初当り","bb","rb","ボーナス","firsthits"],bonusCount:["at","art","at回数","art回数","大当たり","atcount"],previousGames:["前日最終","前日最終スタート","前日g","previousgames"],maxCoins:["最大持玉","最大出玉","最高持玉","最大枚数","maxcoins"]};
-function keyFor(h){let x=normHeader(h);for(let k in aliases)if(aliases[k].some(a=>x===normHeader(a)))return k;return null}function cleanNum(v,key,w){if(v===null||v===undefined||String(v).trim()==="")return null;let s=String(v).replace(/[,，枚Gg回]/g,"").trim();if(!/^[+-]?\d+(\.\d+)?$/.test(s)){w.push(`${key}を数値として読み取れません`);return null}let x=Number(s),max=key==="machineNumber"?999999:key==="maxCoins"?1000000:100000;if(x<0||x>max){w.push(`${key}が範囲外です`);return null}return x}
-function rowObject(raw,common,source,line){let w=[],x={};raw.bonusCount=raw.bonusCount??raw.atCount;["hall","machine","machineNumber"].forEach(k=>x[k]=raw[k]===null||raw[k]===undefined||String(raw[k]).trim()===""?(common[k]||null):String(raw[k]).trim());["currentGames","totalGames","firstHits","bonusCount","previousGames","maxCoins"].forEach(k=>x[k]=cleanNum(raw[k],k,w));if(!x.machineNumber)w.push("台番号を認識できません");if(!x.machine)w.push("機種名がありません");return{data:normalize({...x,hall:x.hall||null,importSource:source}),warnings:w,line,valid:!!x.machineNumber&&!!x.machine,selected:!!x.machineNumber&&!!x.machine&&w.length===0}}
-function parseImport(){let text=$("#import-text").value.trim(),common={hall:$("#import-hall").value.trim(),machine:$("#import-machine").value.trim()};if(!text)throw Error("貼り付けデータが空です");let rows=[];if(text[0]==="["){importSource="JSON貼り付け";let a;try{a=JSON.parse(text)}catch(e){throw Error("JSONを解析できません。形式を確認してください")};if(!Array.isArray(a))throw Error("JSONは配列形式にしてください");if(a.length>200)$("#import-error").textContent="200行を超えたため先頭200行だけ解析しました";rows=a.slice(0,200).map((x,i)=>rowObject(x&&typeof x==="object"?x:{},common,importSource,i+1))}else{importSource="表貼り付け";let lines=text.split(/\r?\n/).filter(x=>x.trim()).slice(0,201);if(lines.length<2)throw Error("ヘッダーとデータ行が必要です");if(text.split(/\r?\n/).filter(x=>x.trim()).length-1>200)$("#import-error").textContent="200行を超えたため先頭200行だけ解析しました";let split=s=>s.includes("\t")?s.split("\t"):s.trim().split(/\s{2,}/),heads=split(lines.shift()).map(keyFor);rows=lines.slice(0,200).map((line,i)=>{let cells=split(line),raw={},warn=[];heads.forEach((k,j)=>{if(!k)return;if(k==="firstHits"&&raw[k]!==undefined)raw[k]=(Number(raw[k])||0)+(Number(cells[j])||0);else raw[k]=cells[j]});if(cells.length!==heads.length)warn.push("列数がヘッダーと一致しません");let rr=rowObject(raw,common,importSource,i+2);rr.warnings=warn.concat(rr.warnings);rr.selected=rr.valid&&rr.warnings.length===0;return rr})}let seen=new Set;rows.forEach(r=>{let k=[r.data.hall,r.data.machine,r.data.machineNumber].join("|");if(seen.has(k)){r.warnings.push("同じ台番号が重複しています");r.selected=false}else seen.add(k)});return rows}
-function previewRender(){let labels=[["ホール","hall"],["機種","machine"],["台番号","machineNumber"],["現在G","currentGames"],["総回転","totalGames"],["初当たり","firstHits"],["AT・ART","bonusCount"],["前日最終","previousGames"],["最大持玉","maxCoins"]];$("#preview-list").innerHTML=previewRows.map((r,i)=>`<article class="preview-card ${r.valid?(r.warnings.length?"warning":""):"invalid"}"><label class="preview-check"><input type="checkbox" data-preview="${i}" ${r.selected?"checked":""} ${r.valid?"":"disabled"}>取り込み対象 · ${r.line}行目</label><div class="preview-grid">${labels.map(p=>`<div><small>${p[0]}</small><strong>${esc(r.data[p[1]]??"—")}</strong></div>`).join("")}</div>${r.warnings.length?`<ul class="warnings">${r.warnings.map(w=>`<li>${esc(w)}</li>`).join("")}</ul>`:""}</article>`).join("");selectedCount()}
-function selectedCount(){$("#selected-count").textContent=`選択中 ${previewRows.filter(r=>r.selected).length}台`}
-function showImport(stage){["paste","preview","done"].forEach(s=>{$("#import-"+s).classList.toggle("hidden",s!==stage);document.querySelector(`[data-step="${s}"]`).classList.toggle("active",s===stage)})}
-function history(){let h=[];try{h=JSON.parse(read(HISTORY)||"[]")}catch(e){};$("#history-list").innerHTML=h.length?h.map(x=>`<div class="history-item">${esc(new Date(x.at).toLocaleString("ja-JP"))}<br>${esc(x.hall||"—")} · ${esc(x.machine||"複数機種")} · 追加${x.added} / 更新${x.updated} / スキップ${x.skipped}</div>`).join(""):"<p>履歴はありません</p>";return h}
-function openImport(){$("#import-modal").classList.remove("hidden");$("#import-hall").value=read(HALL)||"";$("#import-machine").value=read(LAST_MACHINE)||"";showImport("paste");history()}
-$("#open-import").onclick=openImport;["#import-close","#cancel-import","#done-close"].forEach(s=>$(s).onclick=()=>{$("#import-modal").classList.add("hidden")});$("#clear-import").onclick=()=>{$("#import-text").value="";$("#import-error").textContent=""};$("#analyze-import").onclick=()=>{try{$("#import-error").textContent="";previewRows=parseImport();write(LAST_MACHINE,$("#import-machine").value.trim());if($("#import-hall").value.trim())write(HALL,$("#import-hall").value.trim());previewRender();showImport("preview")}catch(e){$("#import-error").textContent=e.message}};$("#back-import").onclick=()=>showImport("paste");
-$("#preview-list").onchange=e=>{if(e.target.dataset.preview!==undefined){previewRows[Number(e.target.dataset.preview)].selected=e.target.checked;selectedCount()}};$("#select-all").onclick=()=>{previewRows.forEach(r=>r.selected=r.valid);previewRender()};$("#select-none").onclick=()=>{previewRows.forEach(r=>r.selected=false);previewRender()};$("#apply-pick").onclick=()=>{let g=n($("#pick-games").value),c=n($("#pick-coins").value),t=n($("#pick-total").value),q=$("#pick-number").value.trim();previewRows.forEach(r=>r.selected=r.valid&&(g===null||(r.data.currentGames||0)>=g)&&(c===null||(r.data.maxCoins||0)>=c)&&(t===null||(r.data.totalGames||0)>=t)&&(!q||String(r.data.machineNumber).includes(q)));previewRender()};
-$("#commit-import").onclick=()=>{let added=0,updated=0,skipped=0,batch=id(),policy=$("#duplicate-mode").value;previewRows.forEach(r=>{if(!r.selected){skipped++;return}let d=normalize({...r.data,importedAt:new Date().toISOString(),importSource,importBatchId:batch}),idx=items.findIndex(x=>String(x.hall||"")===String(d.hall||"")&&x.machine===d.machine&&String(x.machineNumber)===String(d.machineNumber));if(idx>=0&&policy==="skip"){skipped++;return}if(idx>=0&&policy==="update"){let old=items[idx];items[idx]=normalize({...old,...d,id:old.id,createdAt:old.createdAt,currentDiff:old.currentDiff,highDiff:old.highDiff,lowDiff:old.lowDiff,graphState:old.graphState,recentFlow:old.recentFlow,previousGraph:old.previousGraph,note:old.note,updatedAt:new Date().toISOString()});updated++}else{if(idx>=0&&policy==="add")d.id=id();items.push(d);added++}});save();let h=history();h.unshift({at:new Date().toISOString(),hall:$("#import-hall").value.trim(),machine:$("#import-machine").value.trim(),added,updated,skipped});write(HISTORY,JSON.stringify(h.slice(0,10)));$("#import-result").innerHTML=`<strong>${added}台を追加しました</strong><br>${updated}台を更新しました<br>${skipped}台をスキップしました`;showImport("done");history();render()};
-$("#open-export").onclick=()=>{$("#export-modal").classList.remove("hidden");$("#export-text").classList.add("hidden")};$("#export-close").onclick=()=>$("#export-modal").classList.add("hidden");$("#copy-json").onclick=async()=>{let scope=$("#export-scope").value,a=scope==="all"?items:scope==="missing"?items.filter(x=>!graphDone(x)):ranked4().map(x=>{let y={...x};delete y.ev;return y}),text=JSON.stringify(a,null,2);try{if(!navigator.clipboard)throw Error();await navigator.clipboard.writeText(text);notify("JSONをコピーしました")}catch(e){$("#export-text").value=text;$("#export-text").classList.remove("hidden");$("#export-text").select()}};
-function renderV11(){render4();let a=ranked4(),cards=list.querySelectorAll(".card");cards.forEach((card,i)=>{let result=a[i]?.ev,star=card.querySelector(".stars"),heading=card.querySelector(".reasons h4");if(!result)return;let level=Math.max(1,Math.min(5,Math.ceil(result.score/20)));star.classList.remove("star-1","star-2","star-3","star-4","star-5");star.classList.add(`star-${level}`);star.setAttribute("aria-label",`おすすめ度 ${level}/5`);if(heading){heading.textContent=result.commentTitle;heading.classList.add("ai-heading")}})}
-render=renderV11;
-document.querySelectorAll(".mode").forEach(b=>{b.classList.toggle("active",b.dataset.mode===mode);b.onclick=()=>{mode=b.dataset.mode;write(MODE,mode);document.querySelectorAll(".mode").forEach(x=>x.classList.toggle("active",x===b));$("#mode-description").textContent=modeDescription();render()}});$("#mode-description").textContent=modeDescription();hall();render();
-})();
+import { localDateKey, normalizeExpInput, normalizeLevel, normalizePercentage } from "./utils.js";
+import { seriesForJob } from "./jobs.js";
+import {
+  addCharacter,
+  deleteCharacter,
+  findCharacter,
+  getCharacters,
+  loadCharacters,
+  replaceCharacters,
+  saveCharacterOrder,
+  saveCharacters,
+  updateCharacter,
+} from "./characters.js";
+import { applyTemplateToCharacter, resetDailies, syncCompleted } from "./dailies.js";
+import { loadSettings, normalizeDailyTemplate, normalizeSettings, saveSettings } from "./settings.js";
+import { createBackupMetadata, downloadBackup, readBackup } from "./backup.js";
+import { render } from "./render.js";
+import { bindModal, closeModal, createCharacterFields, createCharacterOrderDialog, createDetailDialog, createSettingsDialog, openModal } from "./dialogs.js";
+
+const $ = (id) => document.getElementById(id);
+const elements = {
+  list: $("characterList"),
+  search: $("searchBox"),
+  add: $("addCharacterBtn"),
+  dialog: $("characterDialog"),
+  title: $("dialogTitle"),
+  name: $("characterName"),
+  level: $("characterLevel"),
+  previousLevel: $("characterPreviousLevel"),
+  exp: $("characterExp"),
+  afterDailyExp: $("characterAfterDailyExp"),
+  save: $("saveBtn"),
+  cancel: $("cancelBtn"),
+  remove: $("deleteBtn"),
+  reorderBar: $("reorderBar"),
+  reorderSave: $("saveReorderBtn"),
+  reorderCancel: $("cancelReorderBtn"),
+  reorderNotice: $("reorderNotice"),
+  counts: { all: $("summaryAll"), completed: $("summaryCompleted"), remaining: $("summaryRemaining") },
+  progress: { count: $("dailyProgressCount"), percent: $("dailyProgressPercent"), bar: $("dailyProgressBar"), fill: $("dailyProgressFill"), date: $("dailyProgressDate") },
+};
+const fields = createCharacterFields(elements);
+elements.job = fields.job;
+elements.series = fields.series;
+let editingId = null;
+let settings = loadSettings();
+let viewMode = settings.hideCompleted ? "remaining" : "all";
+let reorderMode = false;
+let draftOrderIds = [];
+let noticeTimer = null;
+
+function charactersForRender() {
+  if (!reorderMode) return getCharacters();
+  const byId = new Map(getCharacters().map((character) => [character.id, character]));
+  return draftOrderIds.map((id, index) => ({ ...byId.get(id), order: index })).filter((character) => character.id);
+}
+
+function refresh() {
+  render({
+    list: elements.list,
+    counts: elements.counts,
+    progress: elements.progress,
+    characters: charactersForRender(),
+    keyword: elements.search.value,
+    sortMode: settings.sortMode,
+    viewMode,
+    reorderMode,
+    onOpenDetail: (id) => detail.open(id),
+    onToggleFavorite: toggleFavorite,
+    onChangeViewMode: (mode) => { if (!reorderMode) { viewMode = mode; refresh(); } },
+    onLongPress: beginCardReorder,
+    onMoveReorder: moveDraftCharacter,
+  });
+}
+
+function canStartCardReorder() {
+  return viewMode === "all" && settings.sortMode === "default" && !elements.search.value.trim();
+}
+
+function showReorderNotice(message) {
+  elements.reorderNotice.textContent = message;
+  elements.reorderNotice.hidden = false;
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => { elements.reorderNotice.hidden = true; }, 2500);
+}
+
+function beginCardReorder() {
+  if (!canStartCardReorder()) {
+    showReorderNotice("全キャラ・登録順表示で並び替えできます");
+    return;
+  }
+  reorderMode = true;
+  draftOrderIds = [...getCharacters()].sort((a, b) => a.order - b.order).map((character) => character.id);
+  elements.reorderBar.hidden = false;
+  elements.add.hidden = true;
+  refresh();
+}
+
+function moveDraftCharacter(id, direction) {
+  const index = draftOrderIds.indexOf(id);
+  const target = index + direction;
+  if (index < 0 || target < 0 || target >= draftOrderIds.length) return;
+  [draftOrderIds[index], draftOrderIds[target]] = [draftOrderIds[target], draftOrderIds[index]];
+  refresh();
+}
+
+function finishCardReorder(save) {
+  if (save) saveCharacterOrder(draftOrderIds);
+  reorderMode = false;
+  draftOrderIds = [];
+  elements.reorderBar.hidden = true;
+  elements.add.hidden = false;
+  refresh();
+}
+
+function applyAutoReset() {
+  if (!settings.autoDailyReset || settings.lastResetDate === localDateKey()) return false;
+  getCharacters().forEach(resetDailies);
+  settings = { ...settings, lastResetDate: localDateKey() };
+  saveCharacters();
+  saveSettings(settings);
+  return true;
+}
+
+function manualDailyReset() {
+  if (!confirm("デイリーのチェックをリセットして、今日分へ更新しますか？\n日課終了後EXPが入力されているキャラは、前日EXPへ引き継がれます。")) return false;
+  if (settings.lastResetDate === localDateKey() && !confirm("今日はすでに更新済みです。\nもう一度リセットしますか？")) return false;
+  getCharacters().forEach(resetDailies);
+  settings = { ...settings, lastResetDate: localDateKey() };
+  saveCharacters();
+  saveSettings(settings);
+  refresh();
+  return true;
+}
+
+function checkAutoResetOnResume() {
+  if (applyAutoReset()) refresh();
+}
+
+function toggleFavorite(id) {
+  const character = findCharacter(id);
+  if (!character) return;
+  character.favorite = !character.favorite;
+  saveCharacters();
+  refresh();
+}
+
+function setDaily(characterId, dailyId, checked) {
+  const character = findCharacter(characterId);
+  const daily = character?.dailies.find((item) => item.id === dailyId);
+  if (!daily) return;
+  daily.checked = checked;
+  syncCompleted(character);
+  saveCharacters();
+}
+
+/** テンプレートのIDを軸に、変更を全キャラクターへ一括反映する。 */
+function applyDailyTemplate(previousTemplate, nextTemplate) {
+  getCharacters().forEach((character) => applyTemplateToCharacter(character, previousTemplate, nextTemplate));
+  saveCharacters();
+}
+
+const detail = createDetailDialog({ find: findCharacter, setDaily, refresh, edit: openEdit });
+const characterOrderDialog = createCharacterOrderDialog({
+  characters: () => [...getCharacters()].sort((a, b) => a.order - b.order),
+  save: (ids) => {
+    saveCharacterOrder(ids);
+    refresh();
+  },
+});
+
+async function restoreBackup(file) {
+  try {
+    const backup = await readBackup(file);
+    if (!confirm("バックアップを復元します。\n\n現在のデータは上書きされます。\n\n続行しますか？")) return;
+    settings = backup.settings ? normalizeSettings(backup.settings) : settings;
+    settings = { ...settings, backupInfo: backup.metadata };
+    // 復元済みの当日チェックを直後の自動リセットで消さないよう、当日は更新済みとして扱う。
+    if (settings.autoDailyReset) settings.lastResetDate = localDateKey();
+    replaceCharacters(backup.characters, settings.dailyTemplate);
+    saveSettings(settings);
+    viewMode = settings.hideCompleted ? "remaining" : "all";
+    refresh();
+  } catch {
+    alert("JSON復元に失敗しました。");
+  }
+}
+
+function createBackup() {
+  const metadata = createBackupMetadata();
+  settings = { ...settings, backupInfo: metadata };
+  saveSettings(settings);
+  downloadBackup(getCharacters(), settings, metadata);
+  return metadata;
+}
+
+const settingsDialog = createSettingsDialog(
+  () => settings,
+  (next) => {
+    const previousTemplate = settings.dailyTemplate;
+    const normalized = normalizeSettings({ ...next, dailyTemplate: normalizeDailyTemplate(next.dailyTemplate) });
+    const enabledToday = !settings.autoDailyReset && normalized.autoDailyReset;
+    settings = enabledToday ? { ...normalized, lastResetDate: localDateKey() } : normalized;
+    applyDailyTemplate(previousTemplate, settings.dailyTemplate);
+    saveSettings(settings);
+    applyAutoReset();
+    refresh();
+  },
+  {
+    onBackup: createBackup,
+    onRestore: restoreBackup,
+    onOpenCharacterOrder: () => characterOrderDialog.open(),
+    onManualDailyReset: manualDailyReset,
+  },
+);
+
+function openAdd() {
+  editingId = null;
+  elements.title.textContent = "キャラクター追加";
+  elements.name.value = "";
+  elements.job.value = "";
+  elements.series.value = "";
+  elements.level.value = "";
+  elements.previousLevel.value = "";
+  elements.exp.value = "";
+  elements.afterDailyExp.value = "";
+  elements.remove.hidden = true;
+  openModal(elements.dialog, elements.name);
+}
+
+function openEdit(id) {
+  const character = findCharacter(id);
+  if (!character) return;
+  editingId = id;
+  elements.title.textContent = "キャラクター編集";
+  elements.name.value = character.name;
+  if (!Array.from(elements.job.options).some((option) => option.value === character.job)) {
+    elements.job.insertBefore(new Option(`既存職業: ${character.job}`, character.job), elements.job.children[1]);
+  }
+  elements.job.value = character.job;
+  elements.series.value = seriesForJob(character.job, character.series);
+  elements.level.value = character.level;
+  elements.previousLevel.value = character.previousLevel;
+  elements.exp.value = normalizeExpInput(character.previousExp);
+  elements.afterDailyExp.value = normalizeExpInput(character.afterDailyExp);
+  elements.remove.hidden = false;
+  openModal(elements.dialog, elements.name);
+}
+
+function saveForm() {
+  const name = elements.name.value.trim();
+  const level = normalizeLevel(elements.level.value);
+  const previousLevel = normalizeLevel(elements.previousLevel.value) || level;
+  const previousExp = normalizeExpInput(elements.exp.value);
+  const afterDailyExp = normalizeExpInput(elements.afterDailyExp.value);
+  if (!name || !level) {
+    alert("キャラ名とレベルを入力してください。");
+    return;
+  }
+  const data = {
+    name,
+    job: elements.job.value,
+    series: seriesForJob(elements.job.value, elements.series.value),
+    level,
+    previousLevel,
+    previousExp,
+    afterDailyExp,
+  };
+  if (editingId) updateCharacter(editingId, data);
+  else addCharacter(data, settings.dailyTemplate);
+  closeModal(elements.dialog);
+  refresh();
+}
+
+function removeCharacter() {
+  const character = findCharacter(editingId);
+  if (!character || !confirm(`「${character.name}」を削除しますか？`)) return;
+  deleteCharacter(editingId);
+  closeModal(elements.dialog);
+  refresh();
+}
+
+function createToolbar() {
+  const config = document.createElement("button");
+  config.type = "button";
+  config.textContent = "設定";
+  config.addEventListener("click", () => settingsDialog.open());
+  const bar = document.createElement("div");
+  bar.className = "tool-controls";
+  bar.append(config);
+  elements.search.insertAdjacentElement("afterend", bar);
+}
+
+elements.add.addEventListener("click", openAdd);
+elements.search.addEventListener("input", refresh);
+elements.save.addEventListener("click", saveForm);
+elements.cancel.addEventListener("click", () => closeModal(elements.dialog));
+elements.remove.addEventListener("click", removeCharacter);
+elements.reorderSave.addEventListener("click", () => finishCardReorder(true));
+elements.reorderCancel.addEventListener("click", () => finishCardReorder(false));
+elements.level.addEventListener("input", () => { elements.level.value = normalizeLevel(elements.level.value); });
+elements.previousLevel.addEventListener("input", () => { elements.previousLevel.value = normalizeLevel(elements.previousLevel.value); });
+elements.exp.addEventListener("blur", () => { elements.exp.value = normalizeExpInput(elements.exp.value); });
+elements.afterDailyExp.addEventListener("blur", () => { elements.afterDailyExp.value = normalizeExpInput(elements.afterDailyExp.value); });
+elements.reorderBar.hidden = true;
+elements.add.hidden = false;
+bindModal(elements.dialog);
+elements.dialog.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && event.target.tagName !== "BUTTON") {
+    event.preventDefault();
+    saveForm();
+  }
+});
+
+// Version 1.3.3: 設定を先に読み込み、旧キャラクターデータへtemplateIdとorderを補完する。
+saveSettings(settings);
+loadCharacters(settings.dailyTemplate);
+applyAutoReset();
+createToolbar();
+refresh();
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkAutoResetOnResume(); });
+window.addEventListener("pageshow", checkAutoResetOnResume);
+window.addEventListener("focus", checkAutoResetOnResume);
