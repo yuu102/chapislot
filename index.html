@@ -1,41 +1,91 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>めいまねつーる</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0d0e10">
+  <title>チャピスロ v2.0</title>
   <link rel="stylesheet" href="style.css">
+  <script type="module" src="js/app.js"></script>
 </head>
 <body>
   <header class="header">
-    <h1>🍁 めいまねつーる</h1>
-    <div class="summary" aria-label="表示フィルター">
-      <button id="summaryAll" class="summary-card" type="button" aria-pressed="true"><span class="title">キャラ</span><span id="characterCount">0</span></button>
-      <button id="summaryCompleted" class="summary-card" type="button" aria-pressed="false"><span class="title">完了</span><span id="completeCount">0</span></button>
-      <button id="summaryRemaining" class="summary-card" type="button" aria-pressed="false"><span class="title">残り</span><span id="remainCount">0</span></button>
-    </div>
-    <section class="daily-progress" aria-label="今日の進捗">
-      <div><span>今日の進捗 <small id="dailyProgressDate"></small></span><strong id="dailyProgressCount">0 / 0</strong><strong id="dailyProgressPercent">0%</strong></div>
-      <div id="dailyProgressBar" class="daily-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="dailyProgressFill"></div></div>
-    </section>
-    <input id="searchBox" type="text" autocomplete="off" placeholder="🔍 キャラ検索">
-    <p id="reorderNotice" class="reorder-notice" role="status" hidden></p>
+    <p class="eyebrow">CHAPISURO · v2.0</p>
+    <h1>チャピスロ</h1>
+    <p>今日は打つ。その中で一番後悔しにくい台を選ぶ相棒。</p>
   </header>
-  <main><section id="characterList" class="card-list"></section></main>
-  <button id="addCharacterBtn" class="fab" type="button">＋</button>
-  <div id="reorderBar" class="reorder-bar" hidden><button id="saveReorderBtn" type="button">保存</button><button id="cancelReorderBtn" type="button">キャンセル</button></div>
-  <dialog id="characterDialog">
-    <h2 id="dialogTitle">キャラクター追加</h2>
-    <div class="form">
-      <label>キャラ名 *</label><input id="characterName" type="text" maxlength="20">
-      <label>レベル *</label><input id="characterLevel" type="text" inputmode="numeric" maxlength="3">
-      <label>前日終了時レベル（任意）</label><input id="characterPreviousLevel" type="text" inputmode="numeric" maxlength="3">
-      <label>前日終了EXP（任意）</label><input id="characterExp" type="text" inputmode="decimal" autocomplete="off" placeholder="例: 45.67">
-      <label>日課終了後EXP（任意）</label><input id="characterAfterDailyExp" type="text" inputmode="decimal" autocomplete="off" placeholder="例: 51.24">
-    </div>
-    <div class="dialog-buttons"><button id="saveBtn" type="button">保存</button><button id="cancelBtn" type="button">キャンセル</button></div>
-    <button id="deleteBtn" class="delete-button" type="button">🗑 キャラ削除</button>
-  </dialog>
-  <script type="module" src="app.js"></script>
+  <main>
+    <section class="control panel">
+      <div class="mode-switch" aria-label="評価モード">
+        <button data-mode="morning" type="button">朝</button>
+        <button data-mode="night" type="button">夜</button>
+      </div>
+      <div class="time-row">
+        <label>閉店時刻 <input id="closing-time" type="time" value="22:45"></label>
+        <div><small>現在時刻</small><strong id="current-time">--:--</strong></div>
+        <div><small>閉店まで</small><strong id="remaining-time">--</strong></div>
+      </div>
+      <p id="mode-help" class="help"></p>
+    </section>
+
+    <section id="current-panel" class="current panel hidden">
+      <p class="eyebrow">現在の候補</p>
+      <div id="current-candidate"></div>
+    </section>
+
+    <section>
+      <div class="section-title">
+        <div><p class="eyebrow">TODAY'S CHOICE</p><h2>今日の候補</h2></div>
+        <button id="reset-patrol" class="link hidden" type="button">巡回をリセット</button>
+      </div>
+      <div id="top-three" class="top-three"></div>
+      <div id="near-tie" class="near-tie hidden"></div>
+    </section>
+
+    <section class="ranking">
+      <div class="section-title">
+        <h2>全候補ランキング <span id="candidate-count">0台</span></h2>
+        <select id="sort-order"><option value="score">おすすめ順</option><option value="games">現在G順</option><option value="created">登録順</option></select>
+      </div>
+      <div id="empty" class="empty">候補台を登録してください。</div>
+      <div id="candidate-list"></div>
+    </section>
+
+    <section class="panel register">
+      <div class="section-title"><div><p class="eyebrow">CANDIDATE</p><h2 id="form-title">候補台を追加</h2></div><button id="cancel-edit" class="link hidden" type="button">編集をやめる</button></div>
+      <form id="candidate-form">
+        <div class="field full"><label>ホール名</label><input name="hall" maxlength="60"></div>
+        <div class="field full"><label>機種名 <b>必須</b></label><input name="machine" list="machines" required><datalist id="machines"><option value="モンキーターンV"><option value="戦国乙女5"><option value="甲鉄城のカバネリ"><option value="L東京喰種"><option value="北斗の拳"></datalist></div>
+        <div class="field"><label>台番号 <b>必須</b></label><input name="machineNumber" inputmode="numeric" required></div>
+        <div class="field"><label>現在ゲーム数</label><input name="currentGames" type="number" min="0" inputmode="numeric"></div>
+        <div class="field"><label>当日総回転</label><input name="totalGames" type="number" min="0" inputmode="numeric"></div>
+        <div class="field"><label>当日初当たり</label><input name="firstHits" type="number" min="0" inputmode="numeric"></div>
+        <div class="field"><label>当日AT回数</label><input name="atCount" type="number" min="0" inputmode="numeric"></div>
+        <div class="field"><label>当日最大持玉</label><input name="maxCoins" type="number" min="0" inputmode="numeric"></div>
+        <div class="field"><label>当日グラフ</label><select name="graphState"><option value="">未入力</option><option>右肩上がり</option><option>緩やかに上昇</option><option>上下しながら上昇</option><option>横ばい</option><option>上下に荒い</option><option>緩やかに下降</option><option>右肩下がり</option><option>大きく凹んでいる</option><option>V字回復</option><option>上昇後に失速</option></select></div>
+        <div class="field"><label>直近の流れ</label><select name="recentFlow"><option value="">未入力</option><option>上昇中</option><option>横ばい</option><option>下降中</option><option>底から回復中</option><option>高い位置で停滞</option><option>低い位置で停滞</option></select></div>
+        <div class="divider full">前日データ（朝モードで重視）</div>
+        <div class="field"><label>前日最終G</label><input name="previousGames" type="number" min="0" inputmode="numeric"></div>
+        <div class="field"><label>前日総回転</label><input name="previousTotalGames" type="number" min="0" inputmode="numeric"></div>
+        <div class="field"><label>前日初当たり</label><input name="previousFirstHits" type="number" min="0" inputmode="numeric"></div>
+        <div class="field"><label>前日AT回数</label><input name="previousAtCount" type="number" min="0" inputmode="numeric"></div>
+        <div class="field"><label>前日最大持玉</label><input name="previousMaxCoins" type="number" min="0" inputmode="numeric"></div>
+        <div class="field"><label>前日グラフ</label><select name="previousGraph"><option value="">未入力</option><option>右肩上がり</option><option>上向き</option><option>横ばい</option><option>下向き</option><option>右肩下がり</option><option>V字回復</option></select></div>
+        <div class="field full"><label>メモ</label><textarea name="note" rows="3" maxlength="500"></textarea></div>
+        <p id="form-error" class="error full"></p>
+        <button class="primary full">候補に保存</button>
+      </form>
+    </section>
+
+    <section class="panel import-panel">
+      <div class="section-title"><div><p class="eyebrow">IMPORT</p><h2>JSON一括取り込み</h2></div></div>
+      <p class="help">v1.1形式とv2形式のJSON配列に対応します。取り込み後、自動で再評価します。</p>
+      <textarea id="import-json" rows="7" placeholder='[{"machine":"モンキーターンV","machineNumber":"123","currentGames":520}]'></textarea>
+      <p id="import-error" class="error"></p>
+      <button id="import-button" class="secondary" type="button">JSONを取り込む</button>
+    </section>
+    <p class="disclaimer">表示は登録候補を比較するための参考評価です。期待値・勝率・設定を保証するものではありません。</p>
+  </main>
+  <div id="toast" class="toast" role="status"></div>
 </body>
 </html>
