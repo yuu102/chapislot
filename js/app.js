@@ -11,7 +11,7 @@ let patrol = loadPatrol();
 let editingId = null;
 let ranked = [];
 
-function context() { return { mode: settings.mode, closingTime: settings.closingTime, now: new Date(), candidates }; }
+function context() { return { mode: settings.mode, closingTime: settings.closingTime, preferenceEnabled: settings.preferenceEnabled !== false, now: new Date(), candidates }; }
 
 function calculateRanking() {
   const initial = candidates.map(candidate => ({ candidate, result: evaluateCandidate(candidate, context(), 1) }))
@@ -42,6 +42,41 @@ function factorList(result) {
     .map(f => `<li><span>${esc(f.reason)}</span><small>${f.contribution >= 0 ? "+" : ""}${f.contribution}点</small></li>`).join("");
 }
 
+function rawFactorValue(item) {
+  if (item.rawValue === null || item.rawValue === "") return "未入力";
+  if (typeof item.rawValue === "number") return item.rawValue.toLocaleString("ja-JP");
+  return esc(item.rawValue);
+}
+
+function evaluationBreakdown(result) {
+  const preference = result.preferenceAdjustment;
+  const factorRows = result.factors.map(item => `
+    <div class="breakdown-row">
+      <div class="breakdown-main"><strong>${esc(item.label)}</strong><b>${item.contribution >= 0 ? "+" : ""}${item.contribution}点</b></div>
+      <small>入力値：${rawFactorValue(item)} ／ 評価値：${Math.round(item.normalizedValue * 100)}% ／ 重み：${Math.round(item.effectiveWeight * 100)}%</small>
+      <p>${esc(item.reason)}</p>
+    </div>`).join("");
+  const adjusted = result.scoreAdjusted
+    ? `<p class="score-adjustment">計算上${result.rawScore}点のため、${result.score === 100 ? "上限100点" : "下限0点"}に補正</p>`
+    : "";
+  return `<details class="evaluation-details">
+    <summary>評価内訳を見る</summary>
+    <div class="breakdown">
+      <h4>評価内訳</h4>
+      <div class="breakdown-row compact"><div class="breakdown-main"><strong>基本点</strong><b>+${result.baseScore}点</b></div></div>
+      ${factorRows}
+      <div class="breakdown-totals">
+        <div><span>factor合計</span><b>+${result.factorScore}点</b></div>
+        <div><span>客観評価</span><b>${result.objectiveScore}点</b></div>
+        <div><span>${esc(preference.label || "ユーザー嗜好補正")}</span><b>${preference.value >= 0 ? "+" : ""}${preference.value}点</b></div>
+        <small>${esc(preference.reason)}</small>
+        <div class="final"><span>最終評価</span><b>${result.score}点（${result.rank}・${result.rankLabel}）</b></div>
+        ${adjusted}
+      </div>
+    </div>
+  </details>`;
+}
+
 function renderCards() {
   let shown = ranked.slice();
   const sort = $("#sort-order").value;
@@ -56,6 +91,7 @@ function renderCards() {
       <div class="signals"><span>${confidenceIcon(r.confidence.level)} 信頼度：${r.confidence.label}</span><span>${riskIcon(r.risk.level)} 危険度：${r.risk.label}</span></div>
       <div class="chappy"><strong>${esc(r.comment.headline)}</strong><p>${esc(r.comment.body)}</p>${r.comment.caution ? `<p>${esc(r.comment.caution)}</p>` : ""}</div>
       <div class="reasons"><h4>この順位になった理由</h4><ul>${factorList(r)}</ul><p class="confidence-reason">${esc(r.confidence.reason)}／${esc(r.risk.reason)}</p></div>
+      ${evaluationBreakdown(r)}
       <div class="summary"><span>現在 ${value(c.today.currentGames)}G</span><span>前日最終 ${value(c.previousDay.finalGames)}G</span><span>${esc(c.today.graphState || "グラフ未入力")}</span></div>
       <div class="patrol-actions"><button data-action="unavailable">空いていない</button><button data-action="hold">保留</button><button data-action="choose">この台に決める</button></div>
       <div class="edit-actions"><button data-action="edit">編集</button><button data-action="delete">削除</button></div>
@@ -108,6 +144,13 @@ function resetForm() { editingId = null; $("#candidate-form").reset(); $("#form-
 document.querySelectorAll("[data-mode]").forEach(button => button.addEventListener("click", () => { settings.mode = button.dataset.mode; saveSettings(settings); render(); }));
 $("#closing-time").value = settings.closingTime;
 $("#closing-time").addEventListener("change", event => { settings.closingTime = event.target.value || "22:45"; saveSettings(settings); render(); });
+$("#preference-enabled").checked = settings.preferenceEnabled !== false;
+$("#preference-enabled").addEventListener("change", event => {
+  settings.preferenceEnabled = event.target.checked;
+  saveSettings(settings);
+  render();
+  toast(event.target.checked ? "好み補正をONにしました" : "客観評価だけで並び替えました");
+});
 $("#sort-order").addEventListener("change", renderCards);
 $("#reset-patrol").addEventListener("click", () => { patrol = { currentId: null, states: {} }; savePatrol(patrol); render(); });
 $("#current-panel").addEventListener("click", event => { if (event.target.dataset.currentAction === "unavailable" && patrol.currentId) unavailable(patrol.currentId); });

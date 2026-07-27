@@ -4,13 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0d0e10">
-  <title>チャピスロ v2.0</title>
+  <title>チャピスロ v2.1</title>
   <link rel="stylesheet" href="style.css">
   <script type="module" src="js/app.js"></script>
 </head>
 <body>
   <header class="header">
-    <p class="eyebrow">CHAPISURO · v2.0</p>
+    <p class="eyebrow">CHAPISURO · v2.1</p>
     <h1>チャピスロ</h1>
     <p>今日は打つ。その中で一番後悔しにくい台を選ぶ相棒。</p>
   </header>
@@ -25,6 +25,10 @@
         <div><small>現在時刻</small><strong id="current-time">--:--</strong></div>
         <div><small>閉店まで</small><strong id="remaining-time">--</strong></div>
       </div>
+      <label class="preference-toggle">
+        <input id="preference-enabled" type="checkbox" checked>
+        <span><b>自分の好みを評価に反映する</b><small>客観評価へ最大±5点の軽い補正を加えます</small></span>
+      </label>
       <p id="mode-help" class="help"></p>
     </section>
 
@@ -55,7 +59,7 @@
       <div class="section-title"><div><p class="eyebrow">CANDIDATE</p><h2 id="form-title">候補台を追加</h2></div><button id="cancel-edit" class="link hidden" type="button">編集をやめる</button></div>
       <form id="candidate-form">
         <div class="field full"><label>ホール名</label><input name="hall" maxlength="60"></div>
-        <div class="field full"><label>機種名 <b>必須</b></label><input name="machine" list="machines" required><datalist id="machines"><option value="モンキーターンV"><option value="戦国乙女5"><option value="甲鉄城のカバネリ"><option value="L東京喰種"><option value="北斗の拳"></datalist></div>
+        <div class="field full"><label>機種名 <b>必須</b></label><input name="machine" list="machines" required><datalist id="machines"><option value="モンキーターンV"><option value="戦国乙女5"><option value="甲鉄城のカバネリ"><option value="L東京喰種"><option value="北斗の拳"><option value="ソードアート・オンライン2"><option value="かぐや様は告らせたい"></datalist></div>
         <div class="field"><label>台番号 <b>必須</b></label><input name="machineNumber" inputmode="numeric" required></div>
         <div class="field"><label>現在ゲーム数</label><input name="currentGames" type="number" min="0" inputmode="numeric"></div>
         <div class="field"><label>当日総回転</label><input name="totalGames" type="number" min="0" inputmode="numeric"></div>

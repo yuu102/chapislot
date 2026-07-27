@@ -56,7 +56,7 @@ export function loadCandidates() {
   return migrated;
 }
 export const saveCandidates = value => write(CANDIDATES_KEY, value);
-export const loadSettings = () => ({ mode: "night", closingTime: "22:45", ...read(SETTINGS_KEY, {}) });
+export const loadSettings = () => ({ mode: "night", closingTime: "22:45", preferenceEnabled: true, ...read(SETTINGS_KEY, {}) });
 export const saveSettings = value => write(SETTINGS_KEY, value);
 export const loadPatrol = () => read(PATROL_KEY, { currentId: null, states: {} });
 export const savePatrol = value => write(PATROL_KEY, value);
