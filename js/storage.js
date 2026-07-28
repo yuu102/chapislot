@@ -2,17 +2,19 @@ const CANDIDATES_KEY = "chapisuro.v2.candidates";
 const SETTINGS_KEY = "chapisuro.v2.settings";
 const PATROL_KEY = "chapisuro.v2.patrol";
 const LOG_KEY = "chapisuro.v2.evaluationLogs";
+const COMPARE_KEY = "chapisuro.v2.comparison";
 const LEGACY_KEY = "chapisuro.phase3.candidates.v1";
 
 const read = (key, fallback) => {
-  try { const value = localStorage.getItem(key); return value === null ? fallback : JSON.parse(value); }
+  try { const stored = localStorage.getItem(key); return stored === null ? fallback : JSON.parse(stored); }
   catch { return fallback; }
 };
-const write = (key, value) => {
-  try { localStorage.setItem(key, JSON.stringify(value)); return true; }
+const write = (key, storedValue) => {
+  try { localStorage.setItem(key, JSON.stringify(storedValue)); return true; }
   catch { return false; }
 };
-const num = value => value === null || value === undefined || value === "" ? null : Number.isFinite(Number(value)) ? Number(value) : null;
+const num = storedValue => storedValue === null || storedValue === undefined || storedValue === "" ? null : Number.isFinite(Number(storedValue)) ? Number(storedValue) : null;
+const validStatus = status => ["active", "hidden", "archived"].includes(status) ? status : "active";
 
 export function normalizeCandidate(source = {}) {
   const today = source.today || {};
@@ -20,6 +22,7 @@ export function normalizeCandidate(source = {}) {
   return {
     schemaVersion: 2,
     id: source.id || globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`,
+    status: validStatus(source.status),
     hall: source.hall || "",
     machine: source.machine || "",
     machineNumber: String(source.machineNumber || ""),
@@ -47,21 +50,58 @@ export function normalizeCandidate(source = {}) {
   };
 }
 
-export function loadCandidates() {
+export function loadAllCandidates() {
   const current = read(CANDIDATES_KEY, null);
   if (Array.isArray(current)) return current.map(normalizeCandidate);
   const legacy = read(LEGACY_KEY, []);
-  const migrated = Array.isArray(legacy) ? legacy.map(normalizeCandidate) : [];
+  const migrated = Array.isArray(legacy) ? legacy.map(item => normalizeCandidate({ ...item, status: "active" })) : [];
   if (migrated.length) write(CANDIDATES_KEY, migrated);
   return migrated;
 }
-export const saveCandidates = value => write(CANDIDATES_KEY, value);
+
+export const loadCandidates = () => loadAllCandidates().filter(candidate => candidate.status === "active");
+export const saveAllCandidates = candidates => write(CANDIDATES_KEY, candidates.map(normalizeCandidate));
+export const saveCandidates = saveAllCandidates;
 export const loadSettings = () => ({ mode: "night", closingTime: "22:45", preferenceEnabled: true, ...read(SETTINGS_KEY, {}) });
-export const saveSettings = value => write(SETTINGS_KEY, value);
-export const loadPatrol = () => read(PATROL_KEY, { currentId: null, states: {} });
-export const savePatrol = value => write(PATROL_KEY, value);
-export function appendEvaluationLog(log) {
+export const saveSettings = settings => write(SETTINGS_KEY, settings);
+export const loadPatrol = () => ({ currentId: null, states: {}, selectedLogId: null, ...read(PATROL_KEY, {}) });
+export const savePatrol = patrol => write(PATROL_KEY, patrol);
+export const loadComparison = () => {
+  const ids = read(COMPARE_KEY, []);
+  return Array.isArray(ids) ? ids.slice(0, 3) : [];
+};
+export const saveComparison = ids => write(COMPARE_KEY, [...new Set(ids)].slice(0, 3));
+export const loadEvaluationLogs = () => {
   const logs = read(LOG_KEY, []);
-  logs.unshift(log);
-  write(LOG_KEY, logs.slice(0, 500));
+  return Array.isArray(logs) ? logs : [];
+};
+export function appendEvaluationLog(log) {
+  const entry = {
+    id: log.id || globalThis.crypto?.randomUUID?.() || `log-${Date.now()}-${Math.random()}`,
+    ...log
+  };
+  write(LOG_KEY, [entry, ...loadEvaluationLogs()].slice(0, 1000));
+  return entry;
+}
+export function attachPlayResult(logId, play) {
+  const logs = loadEvaluationLogs();
+  const index = logs.findIndex(log => log.id === logId);
+  if (index < 0) return false;
+  logs[index] = { ...logs[index], play: { ...play, savedAt: new Date().toISOString() } };
+  return write(LOG_KEY, logs);
+}
+export function deleteEvaluationLogsForCandidate(candidateId) {
+  return write(LOG_KEY, loadEvaluationLogs().filter(log => log.candidateId !== candidateId));
+}
+export function summarizeHistoryByMachine() {
+  const groups = new Map();
+  loadEvaluationLogs().filter(log => log.type === "candidateEvaluation" && log.play).forEach(log => {
+    const key = log.machineId || "default";
+    const current = groups.get(key) || { machineId: key, machine: log.machine || "", sessions: 0, scoreTotal: 0, balance: 0 };
+    current.sessions += 1;
+    current.scoreTotal += Number(log.result?.score || 0);
+    current.balance += Number(log.play.balance || 0);
+    groups.set(key, current);
+  });
+  return [...groups.values()].map(group => ({ ...group, averageScore: group.sessions ? Math.round(group.scoreTotal / group.sessions) : 0 }));
 }

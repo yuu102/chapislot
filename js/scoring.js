@@ -173,12 +173,14 @@ export function evaluateCandidate(candidate, context, position = 1) {
 
 export function evaluationLog(candidate, context, result, position) {
   return {
+    type: "candidateEvaluation",
     logVersion: 1,
     scorerVersion: APP_VERSION,
     evaluatedAt: new Date().toISOString(),
     candidateId: candidate.id,
     hall: candidate.hall,
     machine: candidate.machine,
+    machineId: resolveProfile(candidate.machine).id,
     weekday: new Date().getDay(),
     context: { mode: context.mode, closingTime: context.closingTime, preferenceEnabled: context.preferenceEnabled !== false },
     factors: result.factors,

@@ -1,4 +1,4 @@
-export const APP_VERSION = "2.1.0";
+export const APP_VERSION = "2.2.0";
 
 export const MODES = {
   morning: { label: "朝", help: "前日最終・前日の当たり・最大持玉・グラフを重視" },

@@ -4,13 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0d0e10">
-  <title>チャピスロ v2.1</title>
+  <title>チャピスロ v2.2</title>
   <link rel="stylesheet" href="style.css">
   <script type="module" src="js/app.js"></script>
 </head>
 <body>
   <header class="header">
-    <p class="eyebrow">CHAPISURO · v2.1</p>
+    <p class="eyebrow">CHAPISURO · v2.2</p>
     <h1>チャピスロ</h1>
     <p>今日は打つ。その中で一番後悔しにくい台を選ぶ相棒。</p>
   </header>
@@ -46,10 +46,15 @@
       <div id="near-tie" class="near-tie hidden"></div>
     </section>
 
+    <section id="comparison-panel" class="comparison panel hidden">
+      <div class="section-title compact-title"><div><p class="eyebrow">COMPARE</p><h2>候補比較 <span id="comparison-count">0/3台</span></h2></div></div>
+      <div id="comparison-list" class="comparison-list"></div>
+    </section>
+
     <section class="ranking">
       <div class="section-title">
         <h2>全候補ランキング <span id="candidate-count">0台</span></h2>
-        <select id="sort-order"><option value="score">おすすめ順</option><option value="games">現在G順</option><option value="created">登録順</option></select>
+        <div class="ranking-tools"><select id="sort-order"><option value="score">おすすめ順</option><option value="games">現在G順</option><option value="created">登録順</option></select><button id="open-history" type="button">実戦履歴</button><button id="reset-candidates" type="button">候補をリセット</button></div>
       </div>
       <div id="empty" class="empty">候補台を登録してください。</div>
       <div id="candidate-list"></div>
@@ -90,6 +95,25 @@
     </section>
     <p class="disclaimer">表示は登録候補を比較するための参考評価です。期待値・勝率・設定を保証するものではありません。</p>
   </main>
+  <dialog id="result-dialog">
+    <form id="result-form" method="dialog" class="dialog-form">
+      <p class="eyebrow">SESSION RESULT</p>
+      <h2>実戦終了</h2>
+      <p id="result-candidate" class="help"></p>
+      <label>投資<input name="investment" type="number" min="0" inputmode="numeric" placeholder="20000"></label>
+      <label>回収<input name="recovery" type="number" min="0" inputmode="numeric" placeholder="28000"></label>
+      <output id="balance-preview">収支 0円</output>
+      <label>一言メモ<textarea name="note" rows="3" maxlength="300" placeholder="456っぽい、やめ時ミスった など"></textarea></label>
+      <div class="dialog-actions"><button id="cancel-result" type="button">キャンセル</button><button class="primary" type="submit">実戦結果を保存</button></div>
+    </form>
+  </dialog>
+  <dialog id="history-dialog">
+    <div class="dialog-form">
+      <div class="section-title compact-title"><div><p class="eyebrow">PLAY HISTORY</p><h2>実戦履歴</h2></div><button id="close-history" class="link" type="button">閉じる</button></div>
+      <div id="history-empty" class="empty">実戦履歴はまだありません。</div>
+      <div id="history-list" class="history-list"></div>
+    </div>
+  </dialog>
   <div id="toast" class="toast" role="status"></div>
 </body>
 </html>
