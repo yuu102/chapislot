@@ -19,13 +19,23 @@ const rateScore = (count, games, target) => {
   if (count === null || games === null || games <= 0) return .35;
   return clamp01((count / games) * target);
 };
-const minutesUntil = (closingTime, now) => {
+export function minutesUntil(closingTime, now = new Date()) {
   const [hour, minute] = String(closingTime || "22:45").split(":").map(Number);
   const close = new Date(now);
   close.setHours(hour, minute, 0, 0);
-  return close < now ? 0 : Math.max(0, Math.round((close - now) / 60000));
-};
+  if (close <= now) return 0;
+  return Math.round((close - now) / 60000);
+}
 const rankFor = score => score >= 90 ? ["S", "本命"] : score >= 80 ? ["A", "有力"] : score >= 65 ? ["B", "候補"] : score >= 50 ? ["C", "消去法"] : ["D", "慎重"];
+
+export function applyScoreAdjustments(objectiveRawScore, preferenceValue = 0) {
+  const objectiveScore = clampScore(objectiveRawScore);
+  const objectiveAdjusted = objectiveRawScore !== objectiveScore;
+  const rawScore = objectiveScore + preferenceValue;
+  const score = clampScore(rawScore);
+  const finalAdjusted = rawScore !== score;
+  return { objectiveScore, objectiveAdjusted, rawScore, score, finalAdjusted, scoreAdjusted: objectiveAdjusted || finalAdjusted };
+}
 
 function factor(key, label, rawValue, normalizedValue, weight, reason) {
   return {
@@ -124,10 +134,17 @@ function danger(candidate, context, profile, score) {
 }
 
 function comment(score, position, risk, preference, objectiveScore) {
+  if (risk.level === "danger") {
+    return {
+      headline: preference.enabled && preference.type === "work" ? "好きな作品ではあるけど、今日は残り時間を優先したいところです。" : "今日は残り時間を優先したいところです。",
+      body: "取り切れない可能性があります。",
+      caution: "条件や好みより時間を優先して、深追いはしないでいこう。"
+    };
+  }
   let result;
-  if (position === 1 && score >= 80) result = { headline: "今日はこの台かな。", body: "空いていたら、まずはこの台を確認してよさそう。", caution: risk.level === "danger" ? "条件より時間を優先して、深追いはしないでいこう。" : "座る前に最新データだけもう一度確認しよう。" };
+  if (position === 1 && score >= 80) result = { headline: "今日はこの台かな。", body: "空いていたら、まずはこの台を確認してよさそう。", caution: "座る前に最新データだけもう一度確認しよう。" };
   else if (position === 1) result = { headline: "今日は少し迷うところ。", body: "それでも、この中ならこの台が一番後悔しにくそう。", caution: "無理に追わず、区切りを決めておこう。" };
-  else if (position <= 3) result = { headline: "次に見るならこの台。", body: "上の候補が空いていなければ、移動先として残しておこう。", caution: risk.level === "danger" ? "残り時間には注意。" : "" };
+  else if (position <= 3) result = { headline: "次に見るならこの台。", body: "上の候補が空いていなければ、移動先として残しておこう。", caution: "" };
   else result = { headline: "優先度は少し下がります。", body: "上位候補が埋まっていたときの控えです。", caution: "" };
   if (preference.enabled && preference.value >= 3 && risk.level !== "danger") result.body = "条件も悪くないし、相性を考えると今日はこの台かな。";
   if (preference.enabled && preference.value <= -3) result.caution = "数値上は候補だけど、通常区間の長さは少し気になるところ。";
@@ -146,20 +163,19 @@ export function evaluateCandidate(candidate, context, position = 1) {
     : evaluateNight(candidate, context, profile);
   const factorScore = scoreFactors(factors);
   const objectiveRawScore = BASE_SCORE + factorScore;
-  const objectiveScore = clampScore(objectiveRawScore);
   const preference = preferenceAdjustment(profile, context.preferenceEnabled !== false);
-  const rawScore = objectiveScore + preference.value;
-  const score = clampScore(rawScore);
-  const scoreAdjusted = rawScore !== score || objectiveRawScore !== objectiveScore;
+  const { objectiveScore, objectiveAdjusted, rawScore, score, finalAdjusted, scoreAdjusted } = applyScoreAdjustments(objectiveRawScore, preference.value);
   const [rank, rankLabel] = rankFor(score);
   const result = {
     baseScore: BASE_SCORE,
     factorScore,
     objectiveRawScore,
     objectiveScore,
+    objectiveAdjusted,
     preferenceAdjustment: preference,
     rawScore,
     score,
+    finalAdjusted,
     scoreAdjusted,
     rank,
     rankLabel,
@@ -189,7 +205,11 @@ export function evaluationLog(candidate, context, result, position) {
       factorScore: result.factorScore,
       rawScore: result.rawScore,
       objectiveScore: result.objectiveScore,
+      objectiveRawScore: result.objectiveRawScore,
+      objectiveAdjusted: result.objectiveAdjusted,
       preferenceAdjustment: result.preferenceAdjustment,
+      rawScore: result.rawScore,
+      finalAdjusted: result.finalAdjusted,
       score: result.score,
       rank: result.rank,
       confidence: result.confidence.level,

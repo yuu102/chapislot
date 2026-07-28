@@ -1,4 +1,4 @@
-import { MODES, evaluateCandidate, evaluationLog } from "./scoring.js";
+import { MODES, evaluateCandidate, evaluationLog, minutesUntil } from "./scoring.js";
 import {
   appendEvaluationLog, attachPlayResult, deleteEvaluationLogsForCandidate,
   loadAllCandidates, loadComparison, loadEvaluationLogs, loadPatrol, loadSettings,
@@ -59,12 +59,15 @@ function evaluationBreakdown(result) {
   const rows = result.factors.map(item => `
     <div class="breakdown-row"><div class="breakdown-main"><strong>${esc(item.label)}</strong><b>${item.contribution >= 0 ? "+" : ""}${item.contribution}点</b></div>
     <small>入力値：${rawFactorValue(item)} ／ 評価値：${Math.round(item.normalizedValue * 100)}% ／ 重み：${Math.round(item.effectiveWeight * 100)}%</small><p>${esc(item.reason)}</p></div>`).join("");
-  const adjusted = result.scoreAdjusted ? `<p class="score-adjustment">計算上${result.rawScore}点のため、${result.score === 100 ? "上限100点" : "下限0点"}に補正</p>` : "";
+  const objectiveAdjustment = result.objectiveAdjusted
+    ? `<p class="score-adjustment">客観評価補正：客観計算値${result.objectiveRawScore}点を${result.objectiveScore === 100 ? "上限100点" : "下限0点"}へ補正</p>` : "";
+  const finalAdjustment = result.finalAdjusted
+    ? `<p class="score-adjustment">最終評価補正：好み補正後の計算値${result.rawScore}点を${result.score === 100 ? "上限100点" : "下限0点"}へ補正</p>` : "";
   return `<details class="evaluation-details"><summary>評価内訳を見る</summary><div class="breakdown"><h4>評価内訳</h4>
     <div class="breakdown-row compact"><div class="breakdown-main"><strong>基本点</strong><b>+${result.baseScore}点</b></div></div>${rows}
     <div class="breakdown-totals"><div><span>factor合計</span><b>+${result.factorScore}点</b></div><div><span>客観評価</span><b>${result.objectiveScore}点</b></div>
     <div><span>${esc(preference.label || "ユーザー嗜好補正")}</span><b>${preference.value >= 0 ? "+" : ""}${preference.value}点</b></div><small>${esc(preference.reason)}</small>
-    <div class="final"><span>最終評価</span><b>${result.score}点（${result.rank}・${result.rankLabel}）</b></div>${adjusted}</div></div></details>`;
+    <div class="final"><span>最終評価</span><b>${result.score}点（${result.rank}・${result.rankLabel}）</b></div>${objectiveAdjustment}${finalAdjustment}</div></div></details>`;
 }
 function renderCards() {
   let shown = ranked.slice();
@@ -132,9 +135,8 @@ function renderHistory() {
   }).join("");
 }
 function renderTime() {
-  const now = new Date(), [h, m] = settings.closingTime.split(":").map(Number), close = new Date(now);
-  close.setHours(h, m, 0, 0); if (close < now) close.setDate(close.getDate() + 1);
-  const remaining = Math.max(0, Math.round((close - now) / 60000));
+  const now = new Date();
+  const remaining = minutesUntil(settings.closingTime, now);
   $("#current-time").textContent = now.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
   $("#remaining-time").textContent = `${Math.floor(remaining / 60)}時間${remaining % 60}分`;
 }
