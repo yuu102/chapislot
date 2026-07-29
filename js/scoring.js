@@ -1,24 +1,17 @@
-import { APP_VERSION, MODES, USER_PREFERENCES, resolveProfile } from "./config.js";
+import { APP_VERSION, AXIS_WEIGHTS, MODES, USER_PREFERENCES, resolveMachineCharacteristics, resolveProfile } from "./config.js";
 
-const BASE_SCORE = 15;
-const FACTOR_POINTS = 85;
-const clamp01 = value => Math.max(0, Math.min(1, value));
-const clampScore = value => Math.max(0, Math.min(100, value));
-const graphScore = value => ({
-  "右肩上がり": 1, "緩やかに上昇": .88, "上下しながら上昇": .82,
-  "V字回復": .78, "横ばい": .52, "上下に荒い": .45,
-  "大きく凹んでいる": .34, "緩やかに下降": .25,
-  "上昇後に失速": .18, "右肩下がり": .08,
-  "上向き": .85, "下向き": .25
-}[value] ?? .45);
-const flowScore = value => ({
-  "上昇中": 1, "底から回復中": .9, "高い位置で停滞": .75,
-  "横ばい": .55, "下降中": .2, "低い位置で停滞": .15
-}[value] ?? .45);
-const rateScore = (count, games, target) => {
-  if (count === null || games === null || games <= 0) return .35;
-  return clamp01((count / games) * target);
-};
+const clamp = value => Math.max(0, Math.min(100, Math.round(value)));
+const graphValue = value => ({
+  "右肩上がり": 82, "緩やかに上昇": 76, "上下しながら上昇": 72, "V字回復": 68,
+  "横ばい": 52, "上下に荒い": 45, "大きく凹んでいる": 35, "緩やかに下降": 30,
+  "上昇後に失速": 24, "右肩下がり": 18, "安定した右肩上がり": 78,
+  "一撃上昇": 55, "大きく凹んで終了": 24, "大きく出た後に下降": 22, "不明": 45
+}[value] ?? 45);
+const flowValue = value => ({ "上昇中": 82, "底から回復中": 78, "高い位置で停滞": 68, "横ばい": 52, "下降中": 24, "低い位置で停滞": 28 }[value] ?? 45);
+const sevenDayValue = value => ({ "継続して強め": 72, "強い日が複数ある": 66, "一撃中心": 48, "上下が激しい": 45, "横ばい中心": 50, "弱い日が多い": 38, "継続して弱め": 32, "不明": 45 }[value] ?? 45);
+const levelValue = value => ({ low: 25, medium: 50, high: 75, heavy: 78, long: 78 }[value] ?? 50);
+const rateQuality = (count, games, target) => count === null || games === null || games <= 0 ? 45 : clamp((count / games) * target * 100);
+
 export function minutesUntil(closingTime, now = new Date()) {
   const [hour, minute] = String(closingTime || "22:45").split(":").map(Number);
   const close = new Date(now);
@@ -26,196 +19,132 @@ export function minutesUntil(closingTime, now = new Date()) {
   if (close <= now) return 0;
   return Math.round((close - now) / 60000);
 }
-const rankFor = score => score >= 90 ? ["S", "本命"] : score >= 80 ? ["A", "有力"] : score >= 65 ? ["B", "候補"] : score >= 50 ? ["C", "消去法"] : ["D", "慎重"];
-
-export function applyScoreAdjustments(objectiveRawScore, preferenceValue = 0) {
-  const objectiveScore = clampScore(objectiveRawScore);
-  const objectiveAdjusted = objectiveRawScore !== objectiveScore;
-  const rawScore = objectiveScore + preferenceValue;
-  const score = clampScore(rawScore);
-  const finalAdjusted = rawScore !== score;
-  return { objectiveScore, objectiveAdjusted, rawScore, score, finalAdjusted, scoreAdjusted: objectiveAdjusted || finalAdjusted };
+export function resolveMode(mode, now = new Date()) {
+  if (mode && mode !== "auto") return mode;
+  const hour = now.getHours();
+  return hour < 12 ? "morning" : hour < 18 ? "daytime" : "night";
 }
+const gamePosition = (games, traits) => {
+  if (games === null) return 40;
+  return traits.targetGameRanges.find(range => games >= range.min && games <= range.max)?.score ?? 40;
+};
+const riskLabel = score => score <= 25 ? "低い" : score <= 42 ? "やや低い" : score <= 60 ? "普通" : score <= 78 ? "やや高い" : "高い";
+const safetyLabel = score => score >= 80 ? "高い" : score >= 65 ? "やや高い" : score >= 45 ? "普通" : score >= 25 ? "やや低い" : "低い";
+const recommendation = score => score >= 72 ? { level: "green", icon: "🟢", label: "今からなら座る候補" } : score >= 52 ? { level: "yellow", icon: "🟡", label: "今日打つなら候補" } : { level: "red", icon: "🔴", label: "他に台がなければ" };
 
-function factor(key, label, rawValue, normalizedValue, weight, reason) {
-  return {
-    key,
-    label,
-    rawValue: rawValue === undefined ? null : rawValue,
-    normalizedValue,
-    weight,
-    effectiveWeight: 0,
-    contribution: 0,
-    reason
-  };
-}
-
-export function evaluateMorning(candidate, context, profile) {
-  const p = candidate.previousDay;
-  const weights = profile.weights.morning;
-  return [
-    factor("previousGames", "前日最終ゲーム数", p.finalGames, p.finalGames === null ? .35 : clamp01(p.finalGames / 500), weights.previousGames, p.finalGames === null ? "前日最終ゲーム数が未入力" : `前日最終${p.finalGames}G`),
-    factor("previousMaxCoins", "前日最大持玉", p.maxCoins, p.maxCoins === null ? .35 : clamp01(p.maxCoins / 3500), weights.previousMaxCoins, p.maxCoins === null ? "前日最大持玉が未入力" : `前日最大持玉${p.maxCoins.toLocaleString()}枚`),
-    factor("previousFirstHitRate", "前日初当たり", p.firstHits, rateScore(p.firstHits, p.totalGames, 300), weights.previousFirstHitRate, p.firstHits === null ? "前日初当たりが未入力" : `前日初当たり${p.firstHits}回`),
-    factor("previousAtRate", "前日AT回数", p.atCount, rateScore(p.atCount, p.totalGames, 180), weights.previousAtRate, p.atCount === null ? "前日AT回数が未入力" : `前日AT${p.atCount}回`),
-    factor("previousGraph", "前日グラフ", p.graphState, graphScore(p.graphState), weights.previousGraph, p.graphState ? `前日グラフは${p.graphState}` : "前日グラフが未入力")
-  ];
-}
-
-export function evaluateNight(candidate, context, profile) {
-  const t = candidate.today;
-  const weights = profile.weights.night;
-  const remaining = minutesUntil(context.closingTime, context.now);
-  const timeFit = remaining >= profile.expectedPlayMinutes + 45 ? 1 : remaining >= profile.expectedPlayMinutes ? .6 : remaining >= 60 ? .3 : .05;
-  return [
-    factor("currentGames", "現在ゲーム数", t.currentGames, t.currentGames === null ? .3 : clamp01(t.currentGames / 700), weights.currentGames, t.currentGames === null ? "現在ゲーム数が未入力" : `現在${t.currentGames}G`),
-    factor("graphState", "当日グラフ", t.graphState, graphScore(t.graphState), weights.graphState, t.graphState ? `当日グラフは${t.graphState}` : "当日グラフが未入力"),
-    factor("recentFlow", "直近の流れ", t.recentFlow, flowScore(t.recentFlow), weights.recentFlow, t.recentFlow ? `直近は${t.recentFlow}` : "直近の流れが未入力"),
-    factor("firstHitRate", "初当たり", t.firstHits, rateScore(t.firstHits, t.totalGames, 300), weights.firstHitRate, t.firstHits === null ? "初当たりが未入力" : `初当たり${t.firstHits}回`),
-    factor("atRate", "AT回数", t.atCount, rateScore(t.atCount, t.totalGames, 180), weights.atRate, t.atCount === null ? "AT回数が未入力" : `AT${t.atCount}回`),
-    factor("maxCoins", "最大持玉", t.maxCoins, t.maxCoins === null ? .35 : clamp01(t.maxCoins / 3500), weights.maxCoins, t.maxCoins === null ? "最大持玉が未入力" : `最大持玉${t.maxCoins.toLocaleString()}枚`),
-    factor("timeFit", "残り時間", remaining, timeFit, weights.timeFit, `閉店まで${Math.floor(remaining / 60)}時間${remaining % 60}分`)
-  ];
-}
-
-function scoreFactors(factors) {
-  const totalWeight = factors.reduce((sum, item) => sum + item.weight, 0) || 1;
-  const exact = factors.map(item => item.normalizedValue * (item.weight / totalWeight) * FACTOR_POINTS);
-  const factorScore = Math.round(exact.reduce((sum, points) => sum + points, 0));
-  const rounded = exact.map(Math.round);
-  const difference = factorScore - rounded.reduce((sum, points) => sum + points, 0);
-  if (rounded.length) rounded[rounded.length - 1] += difference;
-  factors.forEach((item, index) => {
-    item.effectiveWeight = item.weight / totalWeight;
-    item.contribution = rounded[index];
-  });
-  return factorScore;
-}
-
-function preferenceAdjustment(profile, enabled) {
+function resolvePreferenceAdjustment(profile, enabled) {
   const configured = USER_PREFERENCES.machinePreferences?.[profile.id];
-  const value = enabled
-    ? Math.max(-5, Math.min(5, Number(configured?.adjustment ?? USER_PREFERENCES.machineAdjustments[profile.id] ?? USER_PREFERENCES.machineAdjustments.default) || 0))
-    : 0;
+  const value = enabled ? Math.max(-5, Math.min(5, Number(configured?.adjustment ?? USER_PREFERENCES.machineAdjustments[profile.id] ?? 0) || 0)) : 0;
   return {
-    enabled: Boolean(enabled),
-    value,
-    type: configured?.type || "general",
+    enabled: Boolean(enabled), value, type: configured?.type || "general",
     label: configured?.label || "ユーザー嗜好補正",
-    reasons: configured?.reasons || [],
-    reason: enabled
-      ? configured?.reasons?.includes("作品が好き")
-        ? "好きな作品のため、遊技満足度を考慮"
-        : USER_PREFERENCES.adjustmentReasons[profile.id] || USER_PREFERENCES.adjustmentReasons.default
-      : "自分の好みを評価に反映する設定がOFF"
+    reason: enabled ? (configured?.reasons?.includes("作品が好き") ? "好きな作品のため、遊技満足度を考慮" : USER_PREFERENCES.adjustmentReasons[profile.id] || "好みによる補正なし") : "好み補正OFF"
   };
 }
 
-function confidence(candidate, mode, closingTime) {
-  const source = mode === "morning" ? candidate.previousDay : candidate.today;
-  const important = mode === "morning"
-    ? [source.finalGames, source.totalGames, source.firstHits, source.atCount, source.maxCoins, source.graphState]
-    : [source.currentGames, source.totalGames, source.firstHits, source.atCount, source.maxCoins, source.graphState, source.recentFlow, closingTime];
-  const filled = important.filter(item => item !== null && item !== "").length;
-  const ratio = filled / important.length;
-  const level = ratio >= .75 ? "high" : ratio >= .45 ? "medium" : "low";
-  const missing = important.length - filled;
-  return { level, label: level === "high" ? "高い" : level === "medium" ? "普通" : "低い", reason: missing ? `主要データ${missing}項目が未入力` : "主要データが揃っています" };
-}
-
-function danger(candidate, context, profile, score) {
+function buildAxes(candidate, context, mode, traits) {
+  const today = candidate.today, previous = candidate.previousDay;
   const remaining = minutesUntil(context.closingTime, context.now);
-  const current = candidate.today.currentGames || 0;
-  if (context.mode === "night" && (remaining < 60 || (remaining < profile.expectedPlayMinutes && current >= 400))) {
-    return { level: "danger", label: "危険", reason: `閉店まで${remaining}分。取り切れない可能性に注意` };
-  }
-  if (context.mode === "night" && (remaining < 120 || score < 50)) return { level: "caution", label: "注意", reason: remaining < 120 ? `閉店まで${remaining}分` : "候補内でも条件が弱め" };
-  return { level: "safe", label: "安全", reason: context.mode === "morning" ? "時間に余裕があります" : `閉店まで${remaining}分` };
+  const games = today.currentGames;
+  const position = gamePosition(games, traits);
+  const ceilingDistance = games === null ? traits.ceilingGames : Math.max(0, traits.ceilingGames - games);
+  const expectedNormalMinutes = ceilingDistance / traits.normalGamesPerMinute;
+  const neededMinutes = expectedNormalMinutes + traits.averageATMinutes;
+  const completionSafety = clamp(remaining <= 0 ? 0 : remaining >= neededMinutes + 60 ? 92 : remaining >= neededMinutes ? 68 : remaining / Math.max(neededMinutes, 1) * 60);
+  const graph = graphValue(today.graphState), flow = flowValue(today.recentFlow);
+  const firstHit = rateQuality(today.firstHits, today.totalGames, 300);
+  const at = rateQuality(today.atCount, today.totalGames, 180);
+  const volume = today.totalGames === null ? 42 : clamp(today.totalGames / 6000 * 100);
+  const maxCoins = today.maxCoins === null ? 45 : clamp(today.maxCoins / 4000 * 100);
+  let machineCondition = clamp(firstHit * .28 + at * .22 + graph * .20 + flow * .12 + volume * .12 + maxCoins * .06);
+  if (mode === "morning") {
+    const previousCondition = graphValue(previous.graphState) * .35 + rateQuality(previous.firstHits, previous.totalGames, 300) * .25 + rateQuality(previous.atCount, previous.totalGames, 180) * .20 + (previous.maxCoins === null ? 45 : clamp(previous.maxCoins / 4000 * 100)) * .10 + sevenDayValue(candidate.sevenDayTrend) * .10;
+    machineCondition = clamp(machineCondition * .35 + previousCondition * .65);
+  } else if (mode === "daytime") machineCondition = clamp(machineCondition * .9 + sevenDayValue(candidate.sevenDayTrend) * .1);
+  const speedRisk = levelValue(traits.investmentSpeed);
+  const depthSafety = position;
+  const estimatedInvestment = Math.round(ceilingDistance * (traits.investmentSpeed === "high" ? 42 : traits.investmentSpeed === "low" ? 26 : 34));
+  let investmentRisk = clamp(100 - depthSafety * .55 + speedRisk * .30 + (100 - completionSafety) * (mode === "night" ? .28 : .12) + (flow < 35 ? 8 : 0));
+  if (Number(context.budget) > 0 && estimatedInvestment > Number(context.budget)) investmentRisk = clamp(investmentRisk + 12);
+  if (traits.machineId === "monkey-v" && position < 75) investmentRisk = clamp(investmentRisk + 8);
+  const nowExpectation = clamp(position * .38 + completionSafety * .25 + machineCondition * .22 + (100 - investmentRisk) * .15);
+  return {
+    remainingMinutes: remaining, ceilingDistance,
+    nowExpectation,
+    investmentRisk: { score: investmentRisk, label: riskLabel(investmentRisk) },
+    completionSafety: { score: completionSafety, label: safetyLabel(completionSafety) },
+    machineCondition,
+    details: { gamePosition: position, neededMinutes: Math.round(neededMinutes), estimatedInvestment, graph, flow, firstHit, at }
+  };
 }
 
-function comment(score, position, risk, preference, objectiveScore) {
-  if (risk.level === "danger") {
-    return {
-      headline: preference.enabled && preference.type === "work" ? "好きな作品ではあるけど、今日は残り時間を優先したいところです。" : "今日は残り時間を優先したいところです。",
-      body: "取り切れない可能性があります。",
-      caution: "条件や好みより時間を優先して、深追いはしないでいこう。"
-    };
-  }
-  let result;
-  if (position === 1 && score >= 80) result = { headline: "今日はこの台かな。", body: "空いていたら、まずはこの台を確認してよさそう。", caution: "座る前に最新データだけもう一度確認しよう。" };
-  else if (position === 1) result = { headline: "今日は少し迷うところ。", body: "それでも、この中ならこの台が一番後悔しにくそう。", caution: "無理に追わず、区切りを決めておこう。" };
-  else if (position <= 3) result = { headline: "次に見るならこの台。", body: "上の候補が空いていなければ、移動先として残しておこう。", caution: "" };
-  else result = { headline: "優先度は少し下がります。", body: "上位候補が埋まっていたときの控えです。", caution: "" };
-  if (preference.enabled && preference.value >= 3 && risk.level !== "danger") result.body = "条件も悪くないし、相性を考えると今日はこの台かな。";
-  if (preference.enabled && preference.value <= -3) result.caution = "数値上は候補だけど、通常区間の長さは少し気になるところ。";
-  if (preference.enabled && preference.type === "work") {
-    if (objectiveScore >= 80) result.body = "条件も悪くないし、好きな作品なら今日はかなり座りやすい候補です。";
-    else if (objectiveScore >= 65) result.body = "数値だけなら強い候補ではないけど、好きな作品という点も含めれば候補に残してよさそう。";
-    else result.body = "条件は少し厳しめ。ただ、作品が好きなら打った満足感は残りやすそう。";
-  }
-  return result;
+function reasonsFor(candidate, axes, mode) {
+  const reasons = [];
+  if (axes.details.gamePosition >= 70) reasons.push({ tone: "plus", text: `現在${candidate.today.currentGames}Gで狙い位置が良い` });
+  else reasons.push({ tone: "minus", text: `現在${candidate.today.currentGames ?? "未入力"}Gで投資開始位置は弱め` });
+  if (axes.completionSafety.score >= 65) reasons.push({ tone: "plus", text: `閉店まで${axes.remainingMinutes}分あり取り切りやすい` });
+  else reasons.push({ tone: "minus", text: `閉店まで${axes.remainingMinutes}分で時間に注意` });
+  if (axes.machineCondition >= 65) reasons.push({ tone: "plus", text: "当日の初当たり・AT・グラフ状態が候補材料" });
+  else if (candidate.today.maxCoins >= 3500 && ["上昇後に失速", "下降中"].includes(candidate.today.recentFlow)) reasons.push({ tone: "minus", text: "大きく出た後に失速している可能性" });
+  else reasons.push({ tone: "minus", text: "当日状態は強い材料が少ない" });
+  if (mode === "morning" && candidate.previousDay.finalGames !== null) reasons.push({ tone: "plus", text: `朝評価で前日最終${candidate.previousDay.finalGames}Gを補助参照` });
+  return reasons.slice(0, 3);
+}
+
+function commentFor(result, preference) {
+  if (result.risk.level === "danger") return {
+    headline: preference.enabled && preference.type === "work" ? "好きな作品ではあるけど、今からは時間を優先したいところです。" : "今からは時間を優先したいところです。",
+    body: "取り切れない可能性があり、候補内でも時間と投資の軽い台を優先したいです。", caution: "深追いは避けよう。"
+  };
+  let body = result.axes.investmentRisk.score <= 45
+    ? "現在ゲーム数と残り時間のバランスが良く、今からなら追加投資を抑えて当たりを狙えそうです。"
+    : result.axes.machineCondition >= 65
+      ? "台の状態は候補材料ですが、今から追う投資と時間も合わせて判断したいです。"
+      : "条件は強くありませんが、この候補の中では今から座る条件を比較して残ります。";
+  if (preference.enabled && preference.type === "work") body += result.finalScore >= 60 ? " 好きな作品なら満足感も含めて候補です。" : " 作品としては楽しめますが、今からの勝ちやすさでは優先度が下がります。";
+  return { headline: result.recommendation.label, body, caution: result.axes.completionSafety.score < 50 ? "終了時間を先に決めておこう。" : "" };
 }
 
 export function evaluateCandidate(candidate, context, position = 1) {
+  const now = context.now || new Date();
+  const mode = resolveMode(context.mode, now);
   const profile = resolveProfile(candidate.machine);
-  const factors = context.mode === "morning"
-    ? evaluateMorning(candidate, context, profile)
-    : evaluateNight(candidate, context, profile);
-  const factorScore = scoreFactors(factors);
-  const objectiveRawScore = BASE_SCORE + factorScore;
-  const preference = preferenceAdjustment(profile, context.preferenceEnabled !== false);
-  const { objectiveScore, objectiveAdjusted, rawScore, score, finalAdjusted, scoreAdjusted } = applyScoreAdjustments(objectiveRawScore, preference.value);
-  const [rank, rankLabel] = rankFor(score);
+  const traits = resolveMachineCharacteristics(candidate.machine);
+  const axes = buildAxes(candidate, { ...context, now }, mode, traits);
+  const weights = AXIS_WEIGHTS[mode];
+  const objectiveScore = clamp(
+    axes.nowExpectation * weights.nowExpectation +
+    (100 - axes.investmentRisk.score) * weights.investmentSafety +
+    axes.completionSafety.score * weights.completionSafety +
+    axes.machineCondition * weights.machineCondition
+  );
+  const preferenceAdjustment = resolvePreferenceAdjustment(profile, context.preferenceEnabled !== false);
+  const finalScore = clamp(objectiveScore + preferenceAdjustment.value);
   const result = {
-    baseScore: BASE_SCORE,
-    factorScore,
-    objectiveRawScore,
-    objectiveScore,
-    objectiveAdjusted,
-    preferenceAdjustment: preference,
-    rawScore,
-    score,
-    finalAdjusted,
-    scoreAdjusted,
-    rank,
-    rankLabel,
-    factors,
-    confidence: confidence(candidate, context.mode, context.closingTime)
+    score: finalScore, finalScore, objectiveScore, rank: "", rankLabel: "",
+    mode, axes, weights, preferenceAdjustment, recommendation: recommendation(finalScore),
+    confidence: { level: candidate.today.totalGames !== null && candidate.today.currentGames !== null ? "high" : candidate.today.currentGames !== null ? "medium" : "low", label: candidate.today.totalGames !== null && candidate.today.currentGames !== null ? "高い" : candidate.today.currentGames !== null ? "普通" : "低い", reason: candidate.today.totalGames !== null ? "当日データを反映" : "未入力項目があり参考評価" },
+    reasons: reasonsFor(candidate, axes, mode)
   };
-  result.risk = danger(candidate, context, profile, score);
-  result.comment = comment(score, position, result.risk, preference, objectiveScore);
+  result.rank = finalScore >= 80 ? "A" : finalScore >= 60 ? "B" : "C";
+  result.rankLabel = result.recommendation.label;
+  result.risk = axes.remainingMinutes <= 0 || axes.completionSafety.score < 25 ? { level: "danger", label: "危険", reason: `閉店まで${axes.remainingMinutes}分。取り切れない可能性` } : axes.investmentRisk.score >= 70 || axes.completionSafety.score < 50 ? { level: "caution", label: "注意", reason: "投資または残り時間に注意" } : { level: "safe", label: "安全", reason: "候補内では時間と投資のバランスが良い" };
+  result.comment = commentFor(result, preferenceAdjustment);
   return result;
 }
 
 export function evaluationLog(candidate, context, result, position) {
   return {
-    type: "candidateEvaluation",
-    logVersion: 1,
-    scorerVersion: APP_VERSION,
-    evaluatedAt: new Date().toISOString(),
-    candidateId: candidate.id,
-    hall: candidate.hall,
-    machine: candidate.machine,
-    machineId: resolveProfile(candidate.machine).id,
-    weekday: new Date().getDay(),
-    context: { mode: context.mode, closingTime: context.closingTime, preferenceEnabled: context.preferenceEnabled !== false },
-    factors: result.factors,
-    result: {
-      baseScore: result.baseScore,
-      factorScore: result.factorScore,
-      rawScore: result.rawScore,
-      objectiveScore: result.objectiveScore,
-      objectiveRawScore: result.objectiveRawScore,
-      objectiveAdjusted: result.objectiveAdjusted,
-      preferenceAdjustment: result.preferenceAdjustment,
-      rawScore: result.rawScore,
-      finalAdjusted: result.finalAdjusted,
-      score: result.score,
-      rank: result.rank,
-      confidence: result.confidence.level,
-      risk: result.risk.level,
-      position
-    }
+    type: "candidateEvaluation", logVersion: 2, scorerVersion: APP_VERSION, scoringVersion: APP_VERSION,
+    evaluatedAt: new Date().toISOString(), candidateId: candidate.id, hall: candidate.hall,
+    machine: candidate.machine, machineId: resolveProfile(candidate.machine).id, weekday: new Date().getDay(),
+    mode: result.mode, remainingMinutes: result.axes.remainingMinutes, finalScore: result.finalScore, rank: position,
+    nowExpectation: result.axes.nowExpectation, investmentRisk: result.axes.investmentRisk,
+    completionSafety: result.axes.completionSafety, machineCondition: result.axes.machineCondition,
+    preferenceAdjustment: result.preferenceAdjustment,
+    candidateSnapshot: JSON.parse(JSON.stringify(candidate)),
+    context: { mode: result.mode, selectedMode: context.mode, closingTime: context.closingTime, preferenceEnabled: context.preferenceEnabled !== false },
+    result: { score: result.finalScore, rank: result.rank, position, objectiveScore: result.objectiveScore, axes: result.axes, preferenceAdjustment: result.preferenceAdjustment, confidence: result.confidence.level, risk: result.risk.level }
   };
 }
 

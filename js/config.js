@@ -1,8 +1,16 @@
-export const APP_VERSION = "2.2.1";
+export const APP_VERSION = "3.0.0";
 
 export const MODES = {
-  morning: { label: "朝", help: "前日最終・前日の当たり・最大持玉・グラフを重視" },
-  night: { label: "夜", help: "現在G・当日グラフ・直近の流れ・当たり履歴・残り時間を重視" }
+  auto: { label: "自動", help: "現在時刻から朝・昼・夜を自動選択" },
+  morning: { label: "朝", help: "前日情報を補助に、今からの着席条件を評価" },
+  daytime: { label: "昼", help: "当日状況・現在G・投資リスクをバランス評価" },
+  night: { label: "夜", help: "残り時間・投資リスク・取り切りやすさを最重視" }
+};
+
+export const AXIS_WEIGHTS = {
+  morning: { nowExpectation: .35, investmentSafety: .20, completionSafety: .10, machineCondition: .35 },
+  daytime: { nowExpectation: .40, investmentSafety: .25, completionSafety: .15, machineCondition: .20 },
+  night: { nowExpectation: .45, investmentSafety: .25, completionSafety: .25, machineCondition: .05 }
 };
 
 const commonMorning = {
@@ -93,4 +101,26 @@ export const USER_PREFERENCES = {
 
 export function resolveProfile(machine = "") {
   return MACHINE_PROFILES.find(p => p.aliases.some(a => machine.includes(a))) || DEFAULT_PROFILE;
+}
+
+const defaultTraits = {
+  investmentSpeed: "medium", initialHitWeight: "medium", averageATDuration: "medium",
+  averageATMinutes: 45, normalGamesPerMinute: 12, lateStartRisk: "medium", ceilingGames: 1000,
+  targetGameRanges: [{ min: 0, max: 299, score: 30 }, { min: 300, max: 599, score: 65 }, { min: 600, max: 9999, score: 90 }]
+};
+
+export const MACHINE_CHARACTERISTICS = {
+  default: defaultTraits,
+  "tokyo-ghoul": { ...defaultTraits, investmentSpeed: "high", initialHitWeight: "heavy", averageATDuration: "long", averageATMinutes: 70, lateStartRisk: "high", ceilingGames: 1200 },
+  "otome-5": { ...defaultTraits, investmentSpeed: "medium", averageATMinutes: 55, ceilingGames: 1000, targetGameRanges: [{ min: 0, max: 249, score: 25 }, { min: 250, max: 549, score: 65 }, { min: 550, max: 9999, score: 92 }] },
+  kabaneri: { ...defaultTraits, investmentSpeed: "medium", averageATMinutes: 45, lateStartRisk: "medium", ceilingGames: 1000 },
+  "monkey-v": { ...defaultTraits, investmentSpeed: "high", initialHitWeight: "heavy", averageATMinutes: 60, lateStartRisk: "high", ceilingGames: 1111, targetGameRanges: [{ min: 0, max: 299, score: 18 }, { min: 300, max: 599, score: 58 }, { min: 600, max: 9999, score: 94 }] },
+  "sao-2": { ...defaultTraits, investmentSpeed: "medium", averageATMinutes: 55, lateStartRisk: "medium", ceilingGames: 1000 },
+  kaguya: { ...defaultTraits, investmentSpeed: "high", initialHitWeight: "heavy", averageATDuration: "long", averageATMinutes: 70, lateStartRisk: "high", ceilingGames: 1000 },
+  hokuto: { ...defaultTraits, investmentSpeed: "medium", averageATMinutes: 50, ceilingGames: 1268 }
+};
+
+export function resolveMachineCharacteristics(machine = "") {
+  const profile = resolveProfile(machine);
+  return { ...MACHINE_CHARACTERISTICS.default, ...(MACHINE_CHARACTERISTICS[profile.id] || {}), machineId: profile.id };
 }

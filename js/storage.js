@@ -43,6 +43,7 @@ export function normalizeCandidate(source = {}) {
       maxCoins: num(previous.maxCoins ?? source.previousMaxCoins),
       graphState: previous.graphState || source.previousGraph || ""
     },
+    sevenDayTrend: source.sevenDayTrend || "",
     note: source.note || "",
     createdAt: source.createdAt || new Date().toISOString(),
     updatedAt: source.updatedAt || new Date().toISOString(),
@@ -62,7 +63,7 @@ export function loadAllCandidates() {
 export const loadCandidates = () => loadAllCandidates().filter(candidate => candidate.status === "active");
 export const saveAllCandidates = candidates => write(CANDIDATES_KEY, candidates.map(normalizeCandidate));
 export const saveCandidates = saveAllCandidates;
-export const loadSettings = () => ({ mode: "night", closingTime: "22:45", preferenceEnabled: true, ...read(SETTINGS_KEY, {}) });
+export const loadSettings = () => ({ mode: "auto", closingTime: "22:45", budget: 30000, preferenceEnabled: true, ...read(SETTINGS_KEY, {}) });
 export const saveSettings = settings => write(SETTINGS_KEY, settings);
 export const loadPatrol = () => ({ currentId: null, states: {}, selectedLogId: null, ...read(PATROL_KEY, {}) });
 export const savePatrol = patrol => write(PATROL_KEY, patrol);

@@ -18,7 +18,7 @@ let editingId = null;
 let ranked = [];
 
 function context() {
-  return { mode: settings.mode, closingTime: settings.closingTime, preferenceEnabled: settings.preferenceEnabled !== false, now: new Date(), candidates };
+  return { mode: settings.mode, closingTime: settings.closingTime, budget: settings.budget, preferenceEnabled: settings.preferenceEnabled !== false, now: new Date(), candidates };
 }
 function persistCandidates() {
   saveAllCandidates(allCandidates);
@@ -30,7 +30,15 @@ const riskIcon = level => level === "safe" ? "🟢" : level === "caution" ? "�
 function calculateRanking() {
   const initial = candidates.map(candidate => ({ candidate, result: evaluateCandidate(candidate, context(), 1) }))
     .sort((a, b) => b.result.score - a.result.score || confidenceValue(b.result.confidence.level) - confidenceValue(a.result.confidence.level) || new Date(b.candidate.createdAt) - new Date(a.candidate.createdAt));
-  return initial.map((entry, index) => ({ ...entry, result: evaluateCandidate(entry.candidate, context(), index + 1), position: index + 1 }));
+  const ordered = initial.map((entry, index) => ({ ...entry, result: evaluateCandidate(entry.candidate, context(), index + 1), position: index + 1 }));
+  if (ordered.length > 1) {
+    const first = ordered[0].result.axes, second = ordered[1].result.axes;
+    const advantage = (100 - first.investmentRisk.score) - (100 - second.investmentRisk.score) >= first.completionSafety.score - second.completionSafety.score
+      ? "他候補より投資開始位置と投資リスクで上回るため1位です"
+      : "他候補より残り時間内に消化しやすいため1位です";
+    ordered[0].result.reasons = [{ tone: "plus", text: advantage }, ...ordered[0].result.reasons].slice(0, 3);
+  }
+  return ordered;
 }
 function candidateTitle(candidate) { return `${esc(candidate.machine)} ${esc(candidate.machineNumber)}番台`; }
 
@@ -43,31 +51,24 @@ function renderTopThree() {
       <small>${confidenceIcon(entry.result.confidence.level)} 信頼度：${entry.result.confidence.label}　${riskIcon(entry.result.risk.level)} 危険度：${entry.result.risk.label}</small>
     </article>`).join("");
   const close = ranked.length > 1 && ranked[0].result.rank === ranked[1].result.rank && ranked[0].result.score - ranked[1].result.score <= 3;
-  $("#near-tie").classList.toggle("hidden", !close);
-  if (close) $("#near-tie").textContent = "第一候補と第二候補はほぼ同評価。空いている方から確認してよさそう。";
+  const allWeak = ranked.length > 0 && ranked.every(entry => entry.result.recommendation.level === "red");
+  $("#near-tie").classList.toggle("hidden", !close && !allWeak);
+  if (allWeak) $("#near-tie").textContent = `どの台も強い候補ではありません。その中では${ranked[0].candidate.machineNumber}番台が最も今から座りやすいです。`;
+  else if (close) $("#near-tie").textContent = "第一候補と第二候補はほぼ同評価。空いている方から確認してよさそう。";
 }
 function factorList(result) {
-  return result.factors.slice().sort((a, b) => b.contribution - a.contribution).slice(0, 5)
-    .map(item => `<li><span>${esc(item.reason)}</span><small>${item.contribution >= 0 ? "+" : ""}${item.contribution}点</small></li>`).join("");
-}
-function rawFactorValue(item) {
-  if (item.rawValue === null || item.rawValue === "") return "未入力";
-  return typeof item.rawValue === "number" ? item.rawValue.toLocaleString("ja-JP") : esc(item.rawValue);
+  return result.reasons.map(item => `<li><span>${item.tone === "plus" ? "＋" : "－"} ${esc(item.text)}</span></li>`).join("");
 }
 function evaluationBreakdown(result) {
   const preference = result.preferenceAdjustment;
-  const rows = result.factors.map(item => `
-    <div class="breakdown-row"><div class="breakdown-main"><strong>${esc(item.label)}</strong><b>${item.contribution >= 0 ? "+" : ""}${item.contribution}点</b></div>
-    <small>入力値：${rawFactorValue(item)} ／ 評価値：${Math.round(item.normalizedValue * 100)}% ／ 重み：${Math.round(item.effectiveWeight * 100)}%</small><p>${esc(item.reason)}</p></div>`).join("");
-  const objectiveAdjustment = result.objectiveAdjusted
-    ? `<p class="score-adjustment">客観評価補正：客観計算値${result.objectiveRawScore}点を${result.objectiveScore === 100 ? "上限100点" : "下限0点"}へ補正</p>` : "";
-  const finalAdjustment = result.finalAdjusted
-    ? `<p class="score-adjustment">最終評価補正：好み補正後の計算値${result.rawScore}点を${result.score === 100 ? "上限100点" : "下限0点"}へ補正</p>` : "";
-  return `<details class="evaluation-details"><summary>評価内訳を見る</summary><div class="breakdown"><h4>評価内訳</h4>
-    <div class="breakdown-row compact"><div class="breakdown-main"><strong>基本点</strong><b>+${result.baseScore}点</b></div></div>${rows}
-    <div class="breakdown-totals"><div><span>factor合計</span><b>+${result.factorScore}点</b></div><div><span>客観評価</span><b>${result.objectiveScore}点</b></div>
+  return `<details class="evaluation-details"><summary>評価内訳を見る</summary><div class="breakdown"><h4>4軸評価</h4>
+    <div class="breakdown-row compact"><div class="breakdown-main"><strong>今から期待度</strong><b>${result.axes.nowExpectation}</b></div></div>
+    <div class="breakdown-row"><div class="breakdown-main"><strong>投資リスク</strong><b>${result.axes.investmentRisk.label}（${result.axes.investmentRisk.score}）</b></div></div>
+    <div class="breakdown-row"><div class="breakdown-main"><strong>取り切りやすさ</strong><b>${result.axes.completionSafety.label}（${result.axes.completionSafety.score}）</b></div></div>
+    <div class="breakdown-row"><div class="breakdown-main"><strong>台の状態期待</strong><b>${result.axes.machineCondition}</b></div></div>
+    <div class="breakdown-totals"><div><span>客観評価</span><b>${result.objectiveScore}点</b></div>
     <div><span>${esc(preference.label || "ユーザー嗜好補正")}</span><b>${preference.value >= 0 ? "+" : ""}${preference.value}点</b></div><small>${esc(preference.reason)}</small>
-    <div class="final"><span>最終評価</span><b>${result.score}点（${result.rank}・${result.rankLabel}）</b></div>${objectiveAdjustment}${finalAdjustment}</div></div></details>`;
+    <div class="final"><span>最終評価</span><b>${result.finalScore}点（${result.recommendation.icon} ${result.recommendation.label}）</b></div></div></div></details>`;
 }
 function renderCards() {
   let shown = ranked.slice();
@@ -80,9 +81,10 @@ function renderCards() {
     const c = entry.candidate, r = entry.result, state = patrol.states[c.id] || "unvisited", selected = comparison.includes(c.id);
     return `<article class="candidate-card ${state}" data-id="${esc(c.id)}">
       <div class="card-head"><div><span class="position">${entry.position}位</span><h3>${candidateTitle(c)}</h3><p>${esc(c.hall || "ホール未設定")}</p></div><div class="score"><b>${r.score}</b><small>点</small><span>${r.rank}・${r.rankLabel}</span></div></div>
-      <div class="signals"><span>${confidenceIcon(r.confidence.level)} 信頼度：${r.confidence.label}</span><span>${riskIcon(r.risk.level)} 危険度：${r.risk.label}</span></div>
+      <div class="signals"><span>${r.recommendation.icon} ${r.recommendation.label}</span><span>${riskIcon(r.risk.level)} 危険度：${r.risk.label}</span></div>
+      <div class="axis-grid"><span>今から期待度<b>${r.axes.nowExpectation}</b></span><span>投資リスク<b>${r.axes.investmentRisk.label}</b></span><span>取り切り<b>${r.axes.completionSafety.label}</b></span><span>台の状態<b>${r.axes.machineCondition}</b></span></div>
       <div class="chappy"><strong>${esc(r.comment.headline)}</strong><p>${esc(r.comment.body)}</p>${r.comment.caution ? `<p>${esc(r.comment.caution)}</p>` : ""}</div>
-      <div class="reasons"><h4>この順位になった理由</h4><ul>${factorList(r)}</ul><p class="confidence-reason">${esc(r.confidence.reason)}／${esc(r.risk.reason)}</p></div>
+      <div class="reasons"><h4>${entry.position === 1 ? "この台を1位にした理由" : "この順位になった理由"}</h4><ul>${factorList(r)}</ul><p class="confidence-reason">${esc(r.confidence.reason)}／${esc(r.risk.reason)}</p></div>
       ${evaluationBreakdown(r)}
       <div class="summary"><span>現在 ${value(c.today.currentGames)}G</span><span>前日最終 ${value(c.previousDay.finalGames)}G</span><span>${esc(c.today.graphState || "グラフ未入力")}</span></div>
       <button class="compare-toggle ${selected ? "selected" : ""}" data-action="compare" aria-pressed="${selected}">${selected ? "✓ 比較に追加済み" : "＋ 比較に追加"}</button>
@@ -113,13 +115,18 @@ function renderComparison() {
   comparison = comparison.filter(id => ranked.some(entry => entry.candidate.id === id)).slice(0, 3);
   saveComparison(comparison);
   const selected = comparison.map(id => ranked.find(entry => entry.candidate.id === id)).filter(Boolean);
+  const best = key => selected.length ? Math.max(...selected.map(entry => key(entry.result))) : null;
+  const bestFinal = best(result => result.finalScore), bestNow = best(result => result.axes.nowExpectation);
+  const bestCompletion = best(result => result.axes.completionSafety.score), bestCondition = best(result => result.axes.machineCondition);
+  const bestRisk = selected.length ? Math.min(...selected.map(entry => entry.result.axes.investmentRisk.score)) : null;
   $("#comparison-panel").classList.toggle("hidden", !selected.length);
   $("#comparison-count").textContent = `${selected.length}/3台`;
   $("#comparison-list").innerHTML = selected.map(entry => {
     const c = entry.candidate, r = entry.result;
     return `<article class="compare-card"><div><span>${entry.position}位</span><strong>${candidateTitle(c)}</strong><b>${r.score}点</b></div>
-      <dl><dt>現在G</dt><dd>${value(c.today.currentGames)}G</dd><dt>グラフ</dt><dd>${esc(c.today.graphState || "未入力")}</dd>
-      <dt>初当たり</dt><dd>${value(c.today.firstHits)}回</dd><dt>最大持玉</dt><dd>${value(c.today.maxCoins)}枚</dd></dl>
+      <dl><dt>最終評価</dt><dd class="${r.finalScore === bestFinal ? "best" : ""}">${r.finalScore}</dd><dt>今から期待</dt><dd class="${r.axes.nowExpectation === bestNow ? "best" : ""}">${r.axes.nowExpectation}</dd><dt>投資リスク</dt><dd class="${r.axes.investmentRisk.score === bestRisk ? "best" : ""}">${r.axes.investmentRisk.label}</dd>
+      <dt>取り切り</dt><dd class="${r.axes.completionSafety.score === bestCompletion ? "best" : ""}">${r.axes.completionSafety.label}</dd><dt>台の状態</dt><dd class="${r.axes.machineCondition === bestCondition ? "best" : ""}">${r.axes.machineCondition}</dd><dt>現在G</dt><dd>${value(c.today.currentGames)}G</dd>
+      <dt>閉店まで</dt><dd>${r.axes.remainingMinutes}分</dd><dt>最大持玉</dt><dd>${value(c.today.maxCoins)}枚</dd><dt>直近</dt><dd>${esc(c.today.recentFlow || "未入力")}</dd></dl>
       <p>${esc(r.comment.headline)} ${esc(r.comment.body)}</p><button data-compare-remove="${esc(c.id)}">比較から外す</button></article>`;
   }).join("");
 }
@@ -143,7 +150,7 @@ function renderTime() {
 function render() {
   ranked = calculateRanking();
   document.querySelectorAll("[data-mode]").forEach(button => button.classList.toggle("active", button.dataset.mode === settings.mode));
-  $("#mode-help").textContent = MODES[settings.mode].help;
+  $("#mode-help").textContent = `${MODES[settings.mode].help}${settings.mode === "auto" && ranked[0] ? `（現在は${MODES[ranked[0].result.mode].label}評価）` : ""}`;
   renderTopThree(); renderCards(); renderCurrent(); renderComparison(); renderHistory(); renderTime();
 }
 
@@ -155,7 +162,7 @@ function moveToNext(id, state) {
 }
 function fillForm(candidate) {
   const form = $("#candidate-form").elements, today = candidate.today, previous = candidate.previousDay;
-  const values = { hall: candidate.hall, machine: candidate.machine, machineNumber: candidate.machineNumber, currentGames: today.currentGames, totalGames: today.totalGames, firstHits: today.firstHits, atCount: today.atCount, maxCoins: today.maxCoins, graphState: today.graphState, recentFlow: today.recentFlow, previousGames: previous.finalGames, previousTotalGames: previous.totalGames, previousFirstHits: previous.firstHits, previousAtCount: previous.atCount, previousMaxCoins: previous.maxCoins, previousGraph: previous.graphState, note: candidate.note };
+  const values = { hall: candidate.hall, machine: candidate.machine, machineNumber: candidate.machineNumber, currentGames: today.currentGames, totalGames: today.totalGames, firstHits: today.firstHits, atCount: today.atCount, maxCoins: today.maxCoins, graphState: today.graphState, recentFlow: today.recentFlow, previousGames: previous.finalGames, previousTotalGames: previous.totalGames, previousFirstHits: previous.firstHits, previousAtCount: previous.atCount, previousMaxCoins: previous.maxCoins, previousGraph: previous.graphState, sevenDayTrend: candidate.sevenDayTrend, note: candidate.note };
   Object.entries(values).forEach(([key, storedValue]) => { if (form[key]) form[key].value = storedValue ?? ""; });
 }
 function resetForm() {
@@ -165,16 +172,22 @@ function openResultDialog() {
   const entry = ranked.find(item => item.candidate.id === patrol.currentId);
   if (!entry || patrol.states[entry.candidate.id] !== "chosen") return;
   $("#result-candidate").textContent = `${entry.candidate.machine} ${entry.candidate.machineNumber}番台`;
-  $("#result-form").reset(); $("#balance-preview").textContent = "収支 0円";
+  $("#result-form").reset();
+  $("#result-form").elements.seatedAt.value = new Date().toISOString();
+  $("#result-form").elements.startGames.value = entry.candidate.today.currentGames ?? "";
+  $("#balance-preview").textContent = "収支 0円";
   $("#result-dialog").showModal();
 }
 
 document.querySelectorAll("[data-mode]").forEach(button => button.addEventListener("click", () => { settings.mode = button.dataset.mode; saveSettings(settings); render(); }));
 $("#closing-time").value = settings.closingTime;
 $("#closing-time").addEventListener("change", event => { settings.closingTime = event.target.value || "22:45"; saveSettings(settings); render(); });
+$("#budget").value = settings.budget || 30000;
+$("#budget").addEventListener("change", event => { settings.budget = Math.max(0, Number(event.target.value || 0)); saveSettings(settings); render(); });
 $("#preference-enabled").checked = settings.preferenceEnabled !== false;
 $("#preference-enabled").addEventListener("change", event => { settings.preferenceEnabled = event.target.checked; saveSettings(settings); render(); toast(event.target.checked ? "好み補正をONにしました" : "客観評価だけで並び替えました"); });
 $("#sort-order").addEventListener("change", renderCards);
+$("#reevaluate").addEventListener("click", () => { render(); toast("現在時刻で再評価しました"); });
 $("#reset-patrol").addEventListener("click", () => { patrol = { currentId: null, states: {}, selectedLogId: null }; savePatrol(patrol); render(); });
 $("#reset-candidates").addEventListener("click", () => {
   if (!candidates.length || !confirm("今日の候補をすべてリセットしますか？\n\n評価履歴は保存されます。")) return;
@@ -228,7 +241,7 @@ $("#candidate-form").addEventListener("submit", event => {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(event.currentTarget)), old = allCandidates.find(candidate => candidate.id === editingId);
   if (!data.machine.trim() || !data.machineNumber.trim()) return $("#form-error").textContent = "機種名と台番号は必須です。";
-  const candidate = normalizeCandidate({ id: old?.id, status: "active", hall: data.hall.trim(), machine: data.machine.trim(), machineNumber: data.machineNumber.trim(), currentGames: data.currentGames, totalGames: data.totalGames, firstHits: data.firstHits, atCount: data.atCount, maxCoins: data.maxCoins, graphState: data.graphState, recentFlow: data.recentFlow, previousGames: data.previousGames, previousTotalGames: data.previousTotalGames, previousFirstHits: data.previousFirstHits, previousAtCount: data.previousAtCount, previousMaxCoins: data.previousMaxCoins, previousGraph: data.previousGraph, note: data.note, createdAt: old?.createdAt, updatedAt: new Date().toISOString() });
+  const candidate = normalizeCandidate({ id: old?.id, status: "active", hall: data.hall.trim(), machine: data.machine.trim(), machineNumber: data.machineNumber.trim(), currentGames: data.currentGames, totalGames: data.totalGames, firstHits: data.firstHits, atCount: data.atCount, maxCoins: data.maxCoins, graphState: data.graphState, recentFlow: data.recentFlow, previousGames: data.previousGames, previousTotalGames: data.previousTotalGames, previousFirstHits: data.previousFirstHits, previousAtCount: data.previousAtCount, previousMaxCoins: data.previousMaxCoins, previousGraph: data.previousGraph, sevenDayTrend: data.sevenDayTrend, note: data.note, createdAt: old?.createdAt, updatedAt: new Date().toISOString() });
   allCandidates = old ? allCandidates.map(item => item.id === old.id ? candidate : item) : [...allCandidates, candidate];
   persistCandidates(); resetForm(); render(); toast(old ? "候補を更新しました" : "候補を追加しました");
 });
@@ -253,7 +266,15 @@ $("#result-form").addEventListener("input", () => {
 $("#result-form").addEventListener("submit", event => {
   event.preventDefault();
   const data = Object.fromEntries(new FormData(event.currentTarget)), investment = Math.max(0, Number(data.investment || 0)), recovery = Math.max(0, Number(data.recovery || 0)), balance = recovery - investment;
-  if (!patrol.selectedLogId || !attachPlayResult(patrol.selectedLogId, { investment, recovery, balance, result: balance > 0 ? "win" : balance < 0 ? "loss" : "draw", note: data.note.trim() })) return toast("保存する評価履歴が見つかりません");
+  const chosenEntry = ranked.find(item => item.candidate.id === patrol.currentId);
+  if (!patrol.selectedLogId || !attachPlayResult(patrol.selectedLogId, {
+    investment, recovery, balance, result: balance > 0 ? "win" : balance < 0 ? "loss" : "draw",
+    seatedAt: data.seatedAt || new Date().toISOString(), endedAt: new Date().toISOString(),
+    startGames: Number(data.startGames || chosenEntry?.candidate.today.currentGames || 0),
+    endGames: Number(data.endGames || 0), maxWonCoins: Number(data.maxWonCoins || 0), finalCoins: Number(data.finalCoins || 0),
+    seatedRank: chosenEntry?.position || null, seatedFinalScore: chosenEntry?.result.finalScore ?? null,
+    seatedAxes: chosenEntry?.result.axes || null, note: data.note.trim()
+  })) return toast("保存する評価履歴が見つかりません");
   const chosenId = patrol.currentId;
   if (chosenId) {
     allCandidates = allCandidates.map(candidate => candidate.id === chosenId ? { ...candidate, status: "archived", updatedAt: new Date().toISOString() } : candidate);
@@ -267,3 +288,4 @@ function toast(message) {
 }
 render();
 setInterval(renderTime, 60000);
+setInterval(render, 300000);

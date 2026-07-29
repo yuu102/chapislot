@@ -4,20 +4,22 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#0d0e10">
-  <title>チャピスロ v2.2.1</title>
+  <title>チャピスロ v3.0</title>
   <link rel="stylesheet" href="style.css">
   <script type="module" src="js/app.js"></script>
 </head>
 <body>
   <header class="header">
-    <p class="eyebrow">CHAPISURO · v2.2.1</p>
+    <p class="eyebrow">CHAPISURO · v3.0</p>
     <h1>チャピスロ</h1>
     <p>今日は打つ。その中で一番後悔しにくい台を選ぶ相棒。</p>
   </header>
   <main>
     <section class="control panel">
       <div class="mode-switch" aria-label="評価モード">
+        <button data-mode="auto" type="button">自動</button>
         <button data-mode="morning" type="button">朝</button>
+        <button data-mode="daytime" type="button">昼</button>
         <button data-mode="night" type="button">夜</button>
       </div>
       <div class="time-row">
@@ -25,11 +27,13 @@
         <div><small>現在時刻</small><strong id="current-time">--:--</strong></div>
         <div><small>閉店まで</small><strong id="remaining-time">--</strong></div>
       </div>
+      <label class="budget-field">今日の予算 <input id="budget" type="number" min="0" step="1000" inputmode="numeric"> 円</label>
       <label class="preference-toggle">
         <input id="preference-enabled" type="checkbox" checked>
         <span><b>自分の好みを評価に反映する</b><small>客観評価へ最大±5点の軽い補正を加えます</small></span>
       </label>
       <p id="mode-help" class="help"></p>
+      <button id="reevaluate" class="secondary" type="button">現在時刻で再評価</button>
     </section>
 
     <section id="current-panel" class="current panel hidden">
@@ -79,7 +83,8 @@
         <div class="field"><label>前日初当たり</label><input name="previousFirstHits" type="number" min="0" inputmode="numeric"></div>
         <div class="field"><label>前日AT回数</label><input name="previousAtCount" type="number" min="0" inputmode="numeric"></div>
         <div class="field"><label>前日最大持玉</label><input name="previousMaxCoins" type="number" min="0" inputmode="numeric"></div>
-        <div class="field"><label>前日グラフ</label><select name="previousGraph"><option value="">未入力</option><option>右肩上がり</option><option>上向き</option><option>横ばい</option><option>下向き</option><option>右肩下がり</option><option>V字回復</option></select></div>
+        <div class="field"><label>前日グラフ</label><select name="previousGraph"><option value="">未入力</option><option>安定した右肩上がり</option><option>一撃上昇</option><option>V字回復</option><option>横ばい</option><option>右肩下がり</option><option>大きく凹んで終了</option><option>大きく出た後に下降</option><option>不明</option></select></div>
+        <div class="field"><label>直近7日傾向</label><select name="sevenDayTrend"><option value="">未入力</option><option>継続して強め</option><option>強い日が複数ある</option><option>一撃中心</option><option>上下が激しい</option><option>横ばい中心</option><option>弱い日が多い</option><option>継続して弱め</option><option>不明</option></select></div>
         <div class="field full"><label>メモ</label><textarea name="note" rows="3" maxlength="500"></textarea></div>
         <p id="form-error" class="error full"></p>
         <button class="primary full">候補に保存</button>
@@ -100,8 +105,13 @@
       <p class="eyebrow">SESSION RESULT</p>
       <h2>実戦終了</h2>
       <p id="result-candidate" class="help"></p>
+      <input name="seatedAt" type="hidden">
       <label>投資<input name="investment" type="number" min="0" inputmode="numeric" placeholder="20000"></label>
       <label>回収<input name="recovery" type="number" min="0" inputmode="numeric" placeholder="28000"></label>
+      <label>開始ゲーム数<input name="startGames" type="number" min="0" inputmode="numeric"></label>
+      <label>終了ゲーム数<input name="endGames" type="number" min="0" inputmode="numeric"></label>
+      <label>最大獲得枚数<input name="maxWonCoins" type="number" min="0" inputmode="numeric"></label>
+      <label>最終獲得枚数<input name="finalCoins" type="number" min="0" inputmode="numeric"></label>
       <output id="balance-preview">収支 0円</output>
       <label>一言メモ<textarea name="note" rows="3" maxlength="300" placeholder="456っぽい、やめ時ミスった など"></textarea></label>
       <div class="dialog-actions"><button id="cancel-result" type="button">キャンセル</button><button class="primary" type="submit">実戦結果を保存</button></div>
