@@ -59,11 +59,17 @@ export function mergeImportedCandidate(existing, imported) {
     sevenDayTrend: preferImported(imported.sevenDayTrend, existing.sevenDayTrend),
     today: {
       ...existing.today, ...imported.today,
+      currentGames: preferImported(imported.today?.currentGames, existing.today?.currentGames),
+      totalGames: preferImported(imported.today?.totalGames, existing.today?.totalGames),
+      firstHits: preferImported(imported.today?.firstHits, existing.today?.firstHits),
+      atCount: preferImported(imported.today?.atCount, existing.today?.atCount),
+      maxCoins: preferImported(imported.today?.maxCoins, existing.today?.maxCoins),
       graphState: preferImported(imported.today?.graphState, existing.today?.graphState),
       recentFlow: preferImported(imported.today?.recentFlow, existing.today?.recentFlow)
     },
     previousDay: {
       ...existing.previousDay, ...imported.previousDay,
+      finalGames: preferImported(imported.previousDay?.finalGames, existing.previousDay?.finalGames),
       totalGames: preferImported(imported.previousDay?.totalGames, existing.previousDay?.totalGames),
       firstHits: preferImported(imported.previousDay?.firstHits, existing.previousDay?.firstHits),
       atCount: preferImported(imported.previousDay?.atCount, existing.previousDay?.atCount),
