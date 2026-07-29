@@ -2,13 +2,14 @@ import { MODES, evaluateCandidate, evaluationLog, minutesUntil } from "./scoring
 import {
   appendEvaluationLog, attachPlayResult, deleteEvaluationLogsForCandidate,
   loadAllCandidates, loadComparison, loadEvaluationLogs, loadPatrol, loadSettings,
-  normalizeCandidate, saveAllCandidates, saveComparison, savePatrol, saveSettings
+  mergeImportedCandidate, normalizeCandidate, saveAllCandidates, saveComparison, savePatrol, saveSettings
 } from "./storage.js";
 
 const $ = selector => document.querySelector(selector);
 const esc = item => String(item ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 const value = number => number === null || number === undefined ? "—" : Number(number).toLocaleString("ja-JP");
 const money = number => `${Number(number || 0) >= 0 ? "+" : ""}${Number(number || 0).toLocaleString("ja-JP")}円`;
+const clone = item => globalThis.structuredClone ? structuredClone(item) : JSON.parse(JSON.stringify(item));
 let allCandidates = loadAllCandidates();
 let candidates = allCandidates.filter(candidate => candidate.status === "active");
 let settings = loadSettings();
@@ -33,10 +34,15 @@ function calculateRanking() {
   const ordered = initial.map((entry, index) => ({ ...entry, result: evaluateCandidate(entry.candidate, context(), index + 1), position: index + 1 }));
   if (ordered.length > 1) {
     const first = ordered[0].result.axes, second = ordered[1].result.axes;
-    const advantage = (100 - first.investmentRisk.score) - (100 - second.investmentRisk.score) >= first.completionSafety.score - second.completionSafety.score
-      ? "他候補より投資開始位置と投資リスクで上回るため1位です"
-      : "他候補より残り時間内に消化しやすいため1位です";
-    ordered[0].result.reasons = [{ tone: "plus", text: advantage }, ...ordered[0].result.reasons].slice(0, 3);
+    const advantages = [
+      { label: "現在ゲーム数と今からの狙いやすさで他候補を上回るため1位です", diff: first.nowExpectation - second.nowExpectation },
+      { label: "投資開始位置と投資リスクで他候補を上回るため1位です", diff: (100 - first.investmentRisk.score) - (100 - second.investmentRisk.score) },
+      { label: "残り時間内に取り切りやすいため1位です", diff: first.completionSafety.score - second.completionSafety.score },
+      { label: "当日の台状態が他候補より良いため1位です", diff: first.machineCondition - second.machineCondition }
+    ];
+    const best = advantages.filter(item => item.diff > 0).sort((a, b) => b.diff - a.diff)[0];
+    const reason = best?.label || "複数項目を合算した総合評価で、わずかに上回ったため1位です";
+    ordered[0].result.reasons = [{ tone: "plus", text: reason }, ...ordered[0].result.reasons].slice(0, 3);
   }
   return ordered;
 }
@@ -173,8 +179,9 @@ function openResultDialog() {
   if (!entry || patrol.states[entry.candidate.id] !== "chosen") return;
   $("#result-candidate").textContent = `${entry.candidate.machine} ${entry.candidate.machineNumber}番台`;
   $("#result-form").reset();
-  $("#result-form").elements.seatedAt.value = new Date().toISOString();
-  $("#result-form").elements.startGames.value = entry.candidate.today.currentGames ?? "";
+  const selectedLog = loadEvaluationLogs().find(log => log.id === patrol.selectedLogId);
+  $("#result-form").elements.seatedAt.value = patrol.activeSession?.selectedAt || selectedLog?.evaluatedAt || "";
+  $("#result-form").elements.startGames.value = patrol.activeSession?.startGames ?? selectedLog?.candidateSnapshot?.today?.currentGames ?? "";
   $("#balance-preview").textContent = "収支 0円";
   $("#result-dialog").showModal();
 }
@@ -188,13 +195,13 @@ $("#preference-enabled").checked = settings.preferenceEnabled !== false;
 $("#preference-enabled").addEventListener("change", event => { settings.preferenceEnabled = event.target.checked; saveSettings(settings); render(); toast(event.target.checked ? "好み補正をONにしました" : "客観評価だけで並び替えました"); });
 $("#sort-order").addEventListener("change", renderCards);
 $("#reevaluate").addEventListener("click", () => { render(); toast("現在時刻で再評価しました"); });
-$("#reset-patrol").addEventListener("click", () => { patrol = { currentId: null, states: {}, selectedLogId: null }; savePatrol(patrol); render(); });
+$("#reset-patrol").addEventListener("click", () => { patrol = { currentId: null, states: {}, selectedLogId: null, activeSession: null }; savePatrol(patrol); render(); });
 $("#reset-candidates").addEventListener("click", () => {
   if (!candidates.length || !confirm("今日の候補をすべてリセットしますか？\n\n評価履歴は保存されます。")) return;
   const count = candidates.length;
   allCandidates = allCandidates.map(candidate => candidate.status === "active" ? { ...candidate, status: "hidden", updatedAt: new Date().toISOString() } : candidate);
   appendEvaluationLog({ type: "resetCandidates", resetAt: new Date().toISOString(), candidateCount: count });
-  patrol = { currentId: null, states: {}, selectedLogId: null }; comparison = [];
+  patrol = { currentId: null, states: {}, selectedLogId: null, activeSession: null }; comparison = [];
   persistCandidates(); savePatrol(patrol); saveComparison(comparison); render(); toast(`${count}台をリセットしました`);
 });
 $("#open-history").addEventListener("click", () => { renderHistory(); $("#history-dialog").showModal(); });
@@ -225,7 +232,9 @@ $("#candidate-list").addEventListener("click", event => {
   if (button.dataset.action === "choose") {
     patrol.states[id] = "chosen"; patrol.currentId = id;
     const log = appendEvaluationLog({ ...evaluationLog(entry.candidate, context(), entry.result, entry.position), machineNumber: entry.candidate.machineNumber });
-    patrol.selectedLogId = log.id; savePatrol(patrol); render(); return toast("この台に決めました。終了時に実戦結果を残せます");
+    patrol.selectedLogId = log.id;
+    patrol.activeSession = { candidateId: id, evaluationLogId: log.id, selectedAt: new Date().toISOString(), startGames: entry.candidate.today.currentGames, candidateSnapshot: clone(entry.candidate) };
+    savePatrol(patrol); render(); return toast("この台に決めました。終了時に実戦結果を残せます");
   }
   if (button.dataset.action === "edit") {
     editingId = id; fillForm(entry.candidate); $("#form-title").textContent = `${entry.candidate.machine} ${entry.candidate.machineNumber}番台を編集`; $("#cancel-edit").classList.remove("hidden"); return $(".register").scrollIntoView({ behavior: "smooth" });
@@ -254,7 +263,7 @@ $("#import-button").addEventListener("click", () => {
     const map = new Map(allCandidates.map(candidate => [`${candidate.hall}|${candidate.machine}|${candidate.machineNumber}`, candidate]));
     imported.forEach(candidate => {
       const key = `${candidate.hall}|${candidate.machine}|${candidate.machineNumber}`, old = map.get(key);
-      map.set(key, old ? { ...candidate, status: "active", id: old.id, createdAt: old.createdAt, note: old.note || candidate.note, today: { ...candidate.today, graphState: candidate.today.graphState || old.today.graphState, recentFlow: candidate.today.recentFlow || old.today.recentFlow } } : candidate);
+      map.set(key, old ? mergeImportedCandidate(old, candidate) : candidate);
     });
     allCandidates = [...map.values()]; persistCandidates(); $("#import-error").textContent = ""; render(); toast(`${imported.length}台を取り込みました`);
   } catch (error) { $("#import-error").textContent = error.message; }
@@ -269,8 +278,8 @@ $("#result-form").addEventListener("submit", event => {
   const chosenEntry = ranked.find(item => item.candidate.id === patrol.currentId);
   if (!patrol.selectedLogId || !attachPlayResult(patrol.selectedLogId, {
     investment, recovery, balance, result: balance > 0 ? "win" : balance < 0 ? "loss" : "draw",
-    seatedAt: data.seatedAt || new Date().toISOString(), endedAt: new Date().toISOString(),
-    startGames: Number(data.startGames || chosenEntry?.candidate.today.currentGames || 0),
+    seatedAt: patrol.activeSession?.selectedAt || data.seatedAt || "", endedAt: new Date().toISOString(),
+    startGames: Number(patrol.activeSession?.startGames ?? data.startGames ?? 0),
     endGames: Number(data.endGames || 0), maxWonCoins: Number(data.maxWonCoins || 0), finalCoins: Number(data.finalCoins || 0),
     seatedRank: chosenEntry?.position || null, seatedFinalScore: chosenEntry?.result.finalScore ?? null,
     seatedAxes: chosenEntry?.result.axes || null, note: data.note.trim()
@@ -279,7 +288,7 @@ $("#result-form").addEventListener("submit", event => {
   if (chosenId) {
     allCandidates = allCandidates.map(candidate => candidate.id === chosenId ? { ...candidate, status: "archived", updatedAt: new Date().toISOString() } : candidate);
   }
-  patrol = { currentId: null, states: {}, selectedLogId: null }; comparison = comparison.filter(id => id !== chosenId);
+  patrol = { currentId: null, states: {}, selectedLogId: null, activeSession: null }; comparison = comparison.filter(id => id !== chosenId);
   persistCandidates(); savePatrol(patrol); saveComparison(comparison); $("#result-dialog").close(); render(); toast(`実戦結果を保存しました（${money(balance)}）`);
 });
 $("#cancel-result").addEventListener("click", () => $("#result-dialog").close());

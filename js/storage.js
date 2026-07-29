@@ -51,6 +51,28 @@ export function normalizeCandidate(source = {}) {
   };
 }
 
+const preferImported = (imported, current) => imported !== null && imported !== undefined && imported !== "" ? imported : current;
+export function mergeImportedCandidate(existing, imported) {
+  return normalizeCandidate({
+    ...existing, ...imported, status: "active", id: existing.id, createdAt: existing.createdAt,
+    note: preferImported(imported.note, existing.note),
+    sevenDayTrend: preferImported(imported.sevenDayTrend, existing.sevenDayTrend),
+    today: {
+      ...existing.today, ...imported.today,
+      graphState: preferImported(imported.today?.graphState, existing.today?.graphState),
+      recentFlow: preferImported(imported.today?.recentFlow, existing.today?.recentFlow)
+    },
+    previousDay: {
+      ...existing.previousDay, ...imported.previousDay,
+      totalGames: preferImported(imported.previousDay?.totalGames, existing.previousDay?.totalGames),
+      firstHits: preferImported(imported.previousDay?.firstHits, existing.previousDay?.firstHits),
+      atCount: preferImported(imported.previousDay?.atCount, existing.previousDay?.atCount),
+      maxCoins: preferImported(imported.previousDay?.maxCoins, existing.previousDay?.maxCoins),
+      graphState: preferImported(imported.previousDay?.graphState, existing.previousDay?.graphState)
+    }
+  });
+}
+
 export function loadAllCandidates() {
   const current = read(CANDIDATES_KEY, null);
   if (Array.isArray(current)) return current.map(normalizeCandidate);
@@ -65,7 +87,7 @@ export const saveAllCandidates = candidates => write(CANDIDATES_KEY, candidates.
 export const saveCandidates = saveAllCandidates;
 export const loadSettings = () => ({ mode: "auto", closingTime: "22:45", budget: 30000, preferenceEnabled: true, ...read(SETTINGS_KEY, {}) });
 export const saveSettings = settings => write(SETTINGS_KEY, settings);
-export const loadPatrol = () => ({ currentId: null, states: {}, selectedLogId: null, ...read(PATROL_KEY, {}) });
+export const loadPatrol = () => ({ currentId: null, states: {}, selectedLogId: null, activeSession: null, ...read(PATROL_KEY, {}) });
 export const savePatrol = patrol => write(PATROL_KEY, patrol);
 export const loadComparison = () => {
   const ids = read(COMPARE_KEY, []);

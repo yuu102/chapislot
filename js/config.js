@@ -1,4 +1,4 @@
-export const APP_VERSION = "3.0.0";
+export const APP_VERSION = "3.0.1";
 
 export const MODES = {
   auto: { label: "自動", help: "現在時刻から朝・昼・夜を自動選択" },

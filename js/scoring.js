@@ -67,14 +67,15 @@ function buildAxes(candidate, context, mode, traits) {
   let investmentRisk = clamp(100 - depthSafety * .55 + speedRisk * .30 + (100 - completionSafety) * (mode === "night" ? .28 : .12) + (flow < 35 ? 8 : 0));
   if (Number(context.budget) > 0 && estimatedInvestment > Number(context.budget)) investmentRisk = clamp(investmentRisk + 12);
   if (traits.machineId === "monkey-v" && position < 75) investmentRisk = clamp(investmentRisk + 8);
-  const nowExpectation = clamp(position * .38 + completionSafety * .25 + machineCondition * .22 + (100 - investmentRisk) * .15);
+  const progressTowardTarget = games === null ? 40 : clamp(games / Math.max(traits.ceilingGames, 1) * 100);
+  const nowExpectation = clamp(position * .75 + progressTowardTarget * .25);
   return {
     remainingMinutes: remaining, ceilingDistance,
     nowExpectation,
     investmentRisk: { score: investmentRisk, label: riskLabel(investmentRisk) },
     completionSafety: { score: completionSafety, label: safetyLabel(completionSafety) },
     machineCondition,
-    details: { gamePosition: position, neededMinutes: Math.round(neededMinutes), estimatedInvestment, graph, flow, firstHit, at }
+    details: { gamePosition: position, progressTowardTarget, neededMinutes: Math.round(neededMinutes), estimatedInvestment, graph, flow, firstHit, at }
   };
 }
 
@@ -84,8 +85,9 @@ function reasonsFor(candidate, axes, mode) {
   else reasons.push({ tone: "minus", text: `現在${candidate.today.currentGames ?? "未入力"}Gで投資開始位置は弱め` });
   if (axes.completionSafety.score >= 65) reasons.push({ tone: "plus", text: `閉店まで${axes.remainingMinutes}分あり取り切りやすい` });
   else reasons.push({ tone: "minus", text: `閉店まで${axes.remainingMinutes}分で時間に注意` });
-  if (axes.machineCondition >= 65) reasons.push({ tone: "plus", text: "当日の初当たり・AT・グラフ状態が候補材料" });
-  else if (candidate.today.maxCoins >= 3500 && ["上昇後に失速", "下降中"].includes(candidate.today.recentFlow)) reasons.push({ tone: "minus", text: "大きく出た後に失速している可能性" });
+  const isPostPeakDecline = candidate.today.graphState === "上昇後に失速" || candidate.today.recentFlow === "下降中";
+  if (candidate.today.maxCoins >= 3500 && isPostPeakDecline) reasons.push({ tone: "minus", text: "大きく出た後に失速している可能性" });
+  else if (axes.machineCondition >= 65) reasons.push({ tone: "plus", text: "当日の初当たり・AT・グラフ状態が候補材料" });
   else reasons.push({ tone: "minus", text: "当日状態は強い材料が少ない" });
   if (mode === "morning" && candidate.previousDay.finalGames !== null) reasons.push({ tone: "plus", text: `朝評価で前日最終${candidate.previousDay.finalGames}Gを補助参照` });
   return reasons.slice(0, 3);
@@ -120,10 +122,16 @@ export function evaluateCandidate(candidate, context, position = 1) {
   );
   const preferenceAdjustment = resolvePreferenceAdjustment(profile, context.preferenceEnabled !== false);
   const finalScore = clamp(objectiveScore + preferenceAdjustment.value);
+  const confidenceFields = mode === "morning"
+    ? [candidate.today.currentGames, candidate.previousDay.finalGames, candidate.previousDay.totalGames, candidate.previousDay.firstHits, candidate.previousDay.atCount, candidate.previousDay.maxCoins, candidate.previousDay.graphState, candidate.sevenDayTrend]
+    : [candidate.today.currentGames, candidate.today.totalGames, candidate.today.firstHits, candidate.today.atCount, candidate.today.maxCoins, candidate.today.graphState, candidate.today.recentFlow];
+  const filled = confidenceFields.filter(item => item !== null && item !== undefined && item !== "").length;
+  const confidenceLevel = filled >= 6 ? "high" : filled >= 3 ? "medium" : "low";
+  const confidenceText = confidenceLevel === "high" ? "主要データが十分入力されています" : confidenceLevel === "medium" ? "一部未入力項目があるため参考評価です" : "入力データが少ないため順位の信頼度は低めです";
   const result = {
     score: finalScore, finalScore, objectiveScore, rank: "", rankLabel: "",
     mode, axes, weights, preferenceAdjustment, recommendation: recommendation(finalScore),
-    confidence: { level: candidate.today.totalGames !== null && candidate.today.currentGames !== null ? "high" : candidate.today.currentGames !== null ? "medium" : "low", label: candidate.today.totalGames !== null && candidate.today.currentGames !== null ? "高い" : candidate.today.currentGames !== null ? "普通" : "低い", reason: candidate.today.totalGames !== null ? "当日データを反映" : "未入力項目があり参考評価" },
+    confidence: { level: confidenceLevel, label: confidenceLevel === "high" ? "高い" : confidenceLevel === "medium" ? "普通" : "低い", reason: confidenceText, filled, total: confidenceFields.length },
     reasons: reasonsFor(candidate, axes, mode)
   };
   result.rank = finalScore >= 80 ? "A" : finalScore >= 60 ? "B" : "C";
